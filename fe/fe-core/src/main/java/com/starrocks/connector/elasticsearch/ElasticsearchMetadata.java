@@ -16,7 +16,6 @@ package com.starrocks.connector.elasticsearch;
 
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.Database;
-import com.starrocks.catalog.EsResource;
 import com.starrocks.catalog.EsTable;
 import com.starrocks.catalog.PartitionKey;
 import com.starrocks.catalog.SinglePartitionInfo;
@@ -104,7 +103,7 @@ public class ElasticsearchMetadata
                                     String tableName) {
         List<Column> columns = EsUtil.convertColumnSchema(esRestClient, tableName);
         try {
-            properties.put(EsResource.INDEX, tableName);
+            properties.put(EsTable.INDEX, tableName);
             EsTable esTable = new EsTable(CONNECTOR_ID_GENERATOR.getNextId().asInt(),
                     tableName,
                     columns,
