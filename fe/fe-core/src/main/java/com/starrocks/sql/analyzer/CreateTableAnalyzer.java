@@ -34,7 +34,7 @@ import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReport;
 import com.starrocks.common.FeConstants;
 import com.starrocks.common.util.PropertyAnalyzer;
-import com.starrocks.external.elasticsearch.EsUtil;
+import com.starrocks.connector.elasticsearch.external.EsUtil;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.sql.ast.CreateTableStmt;
 import com.starrocks.sql.ast.DistributionDesc;

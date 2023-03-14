@@ -15,8 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package com.starrocks.external.elasticsearch;
+package com.starrocks.connector.elasticsearch.external;
 
+import com.starrocks.connector.elasticsearch.external.EsUtil;
 import org.json.JSONException;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;

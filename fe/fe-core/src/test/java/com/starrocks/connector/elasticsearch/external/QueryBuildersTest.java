@@ -15,10 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package com.starrocks.external.elasticsearch;
+package com.starrocks.connector.elasticsearch.external;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.starrocks.connector.elasticsearch.external.QueryBuilders;
 import org.junit.Test;
 
 import java.io.IOException;

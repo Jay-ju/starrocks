@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package com.starrocks.external.elasticsearch;
+package com.starrocks.connector.elasticsearch.external;
 
 import com.starrocks.thrift.TNetworkAddress;
 import org.apache.commons.lang.StringUtils;

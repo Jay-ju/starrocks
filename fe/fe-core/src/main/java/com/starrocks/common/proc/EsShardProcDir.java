@@ -23,8 +23,8 @@ import com.starrocks.catalog.Database;
 import com.starrocks.catalog.EsTable;
 import com.starrocks.common.AnalysisException;
 import com.starrocks.common.util.ListComparator;
-import com.starrocks.external.elasticsearch.EsShardPartitions;
-import com.starrocks.external.elasticsearch.EsShardRouting;
+import com.starrocks.connector.elasticsearch.external.EsShardPartitions;
+import com.starrocks.connector.elasticsearch.external.EsShardRouting;
 
 import java.util.ArrayList;
 import java.util.Collections;
