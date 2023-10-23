@@ -248,7 +248,7 @@ public class SparkLoadPendingTask extends LoadTask {
         }
     }
 
-    private List<EtlIndex> createEtlIndexes(OlapTable table) throws LoadException {
+    public static List<EtlIndex> createEtlIndexes(OlapTable table) throws LoadException {
         List<EtlIndex> etlIndexes = Lists.newArrayList();
 
         for (Map.Entry<Long, List<Column>> entry : table.getIndexIdToSchema().entrySet()) {
@@ -283,6 +283,9 @@ public class SparkLoadPendingTask extends LoadTask {
                 case UNIQUE_KEYS:
                     indexType = "UNIQUE";
                     break;
+                case PRIMARY_KEYS:
+                    indexType = "PRIMARY";
+                    break;
                 default:
                     String errMsg = "unknown keys type. type: " + keysType.name();
                     LOG.warn(errMsg);
@@ -298,7 +301,7 @@ public class SparkLoadPendingTask extends LoadTask {
         return etlIndexes;
     }
 
-    private EtlColumn createEtlColumn(Column column) {
+    private static EtlColumn createEtlColumn(Column column) {
         // column name
         String name = column.getName();
         // column type
@@ -347,7 +350,7 @@ public class SparkLoadPendingTask extends LoadTask {
                 stringLength, precision, scale);
     }
 
-    private EtlPartitionInfo createEtlPartitionInfo(OlapTable table, Set<Long> partitionIds) throws LoadException {
+    public static EtlPartitionInfo createEtlPartitionInfo(OlapTable table, Set<Long> partitionIds) throws LoadException {
         PartitionType type = table.getPartitionInfo().getType();
 
         List<String> partitionColumnRefs = Lists.newArrayList();

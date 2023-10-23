@@ -39,11 +39,13 @@ import com.google.common.base.Strings;
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.Database;
 import com.starrocks.catalog.OlapTable;
+import com.starrocks.catalog.Partition;
 import com.starrocks.catalog.PrimitiveType;
 import com.starrocks.catalog.ScalarType;
 import com.starrocks.catalog.Table;
 import com.starrocks.catalog.Type;
 import com.starrocks.common.DdlException;
+import com.starrocks.common.LoadException;
 import com.starrocks.common.StarRocksHttpException;
 import com.starrocks.http.ActionController;
 import com.starrocks.http.BaseRequest;
@@ -51,6 +53,9 @@ import com.starrocks.http.BaseResponse;
 import com.starrocks.http.IllegalArgException;
 import com.starrocks.privilege.AccessDeniedException;
 import com.starrocks.privilege.PrivilegeType;
+import com.starrocks.load.loadv2.SparkLoadPendingTask;
+import com.starrocks.load.loadv2.etl.EtlJobConfig;
+import com.starrocks.mysql.privilege.PrivPredicate;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.sql.analyzer.Authorizer;
@@ -61,6 +66,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Get table schema for specified cluster.database.table with privilege checking
@@ -110,6 +117,15 @@ public class TableSchemaAction extends RestBaseAction {
                     throw new StarRocksHttpException(HttpResponseStatus.FORBIDDEN, "Table [" + tableName + "] "
                             + "is not a OlapTable, only support OlapTable currently");
                 }
+                // build ETLTable
+                // indexes
+                Set<Long> partitionIds = table.getPartitions().stream().map(Partition::getId).collect(Collectors.toSet());
+                List<EtlJobConfig.EtlIndex> etlIndexes = SparkLoadPendingTask.createEtlIndexes((OlapTable) table);
+                // partition info
+                EtlJobConfig.EtlPartitionInfo etlPartitionInfo = SparkLoadPendingTask.createEtlPartitionInfo(
+                        (OlapTable) table, partitionIds);
+                EtlJobConfig.EtlTable etlTable = new EtlJobConfig.EtlTable(etlIndexes, etlPartitionInfo);
+
                 try {
                     List<Column> columns = table.getBaseSchema();
                     List<Map<String, String>> propList = new ArrayList(columns.size());
@@ -125,10 +141,13 @@ public class TableSchemaAction extends RestBaseAction {
                         baseInfo.put("type", primitiveType.toString());
                         baseInfo.put("comment", column.getComment());
                         baseInfo.put("name", column.getName());
+                        baseInfo.put("isKey", column.isKey() ? "true" : "false");
                         propList.add(baseInfo);
                     }
                     resultMap.put("status", 200);
                     resultMap.put("properties", propList);
+                    resultMap.put("etlTable", etlTable);
+                    resultMap.put("tableId",  String.valueOf(table.getId()));
                 } catch (Exception e) {
                     // Transform the general Exception to custom StarRocksHttpException
                     throw new StarRocksHttpException(HttpResponseStatus.INTERNAL_SERVER_ERROR,
@@ -140,6 +159,10 @@ public class TableSchemaAction extends RestBaseAction {
         } catch (StarRocksHttpException e) {
             // status code  should conforms to HTTP semantic
             resultMap.put("status", e.getCode().code());
+            resultMap.put("exception", e.getMessage());
+        } catch (LoadException e) {
+            // status code  should conforms to HTTP semantic
+            resultMap.put("status", "-1");
             resultMap.put("exception", e.getMessage());
         }
         ObjectMapper mapper = new ObjectMapper();
