@@ -378,7 +378,7 @@ public class SparkLoadPendingTask extends LoadTask {
         return new EtlPartitionInfo(type.typeString, partitionColumnRefs, distributionColumnRefs, etlPartitions);
     }
 
-    private List<EtlPartition> initEtlListPartition(
+    private static List<EtlPartition> initEtlListPartition(
             List<String> partitionColumnRefs, OlapTable table, Set<Long> partitionIds) throws LoadException {
         ListPartitionInfo listPartitionInfo = (ListPartitionInfo) table.getPartitionInfo();
         for (Column column : listPartitionInfo.getPartitionColumns()) {
@@ -413,7 +413,7 @@ public class SparkLoadPendingTask extends LoadTask {
         return etlPartitions;
     }
 
-    private List<Object> initItemOfInKeys(List<LiteralExpr> list) {
+    private static List<Object> initItemOfInKeys(List<LiteralExpr> list) {
         List<Object> curList = new ArrayList<>();
         for (LiteralExpr literalExpr : list) {
             Object keyValue;
@@ -427,7 +427,7 @@ public class SparkLoadPendingTask extends LoadTask {
         return curList;
     }
 
-    private List<EtlPartition> initEtlRangePartition(
+    private static List<EtlPartition> initEtlRangePartition(
             List<String> partitionColumnRefs, OlapTable table, Set<Long> partitionIds) throws LoadException {
         RangePartitionInfo rangePartitionInfo = (RangePartitionInfo) table.getPartitionInfo();
         List<EtlPartition> etlPartitions = Lists.newArrayList();
@@ -498,7 +498,7 @@ public class SparkLoadPendingTask extends LoadTask {
         return etlPartitions;
     }
 
-    private List<EtlPartition> initEtlUnPartitioned(OlapTable table, Set<Long> partitionIds) throws LoadException {
+    private static List<EtlPartition> initEtlUnPartitioned(OlapTable table, Set<Long> partitionIds) throws LoadException {
         PartitionType type = table.getPartitionInfo().getType();
         List<EtlPartition> etlPartitions = Lists.newArrayList();
         Preconditions.checkState(type == PartitionType.UNPARTITIONED);
