@@ -566,7 +566,7 @@ public class EtlStatus implements Writable {
             return gson.toJson(details);
         }
 
-        public String toJson() throws IOException {
+        public synchronized String toJson() throws IOException {
             return GsonUtils.GSON.toJson(this);
         }
 
