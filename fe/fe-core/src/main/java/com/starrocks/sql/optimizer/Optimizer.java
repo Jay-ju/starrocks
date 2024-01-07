@@ -475,6 +475,7 @@ public class Optimizer {
         if (isShortCircuit) {
             deriveLogicalProperty(tree);
             ruleRewriteIterative(tree, rootTaskContext, RuleSetType.SHORT_CIRCUIT_SET);
+            ruleRewriteOnlyOnce(tree, rootTaskContext, new MergeProjectWithChildRule());
             OptExpression result = tree.getInputs().get(0);
             result.setShortCircuit(true);
             return Optional.of(result);
