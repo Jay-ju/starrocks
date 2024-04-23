@@ -19,6 +19,7 @@
 #include <string_view>
 
 #include "common/statusor.h"
+#include "fs/fs.h"
 #include "gen_cpp/types.pb.h"
 #include "storage/base_tablet.h"
 #include "storage/lake/metadata_iterator.h"
@@ -135,12 +136,17 @@ public:
 
     int64_t data_size();
 
+    const std::shared_ptr<LocationProvider>& location_provider() const { return _location_provider; }
+
     size_t num_rows() const override;
 
 private:
     TabletManager* _mgr;
     int64_t _id;
     int64_t _version_hint = 0;
+    std::shared_ptr<LocationProvider> _location_provider;
+    TabletMetadataPtr _tablet_metadata;
+    std::shared_ptr<TabletSchema> _tablet_schema;
 };
 
 } // namespace starrocks::lake

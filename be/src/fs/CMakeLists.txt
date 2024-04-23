@@ -31,8 +31,12 @@ set(EXEC_FILES
     hdfs/fs_hdfs.cpp
     hdfs/hdfs_fs_cache.cpp
     fs_util.cpp
-    fs_starlet.cpp
     )
+
+if (NOT BUILD_FORMAT_LIB)
+    list(APPEND EXEC_FILES fs_starlet.cpp)
+    message(STATUS "include fs_starlet.cpp when build fs.")
+endif()
 
 add_library(FileSystem STATIC
     ${EXEC_FILES}

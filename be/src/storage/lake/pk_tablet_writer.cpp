@@ -54,7 +54,12 @@ Status HorizontalPkTabletWriter::write(const Chunk& data, const std::vector<uint
 
 Status HorizontalPkTabletWriter::flush_del_file(const Column& deletes) {
     auto name = gen_del_filename(_txn_id);
-    ASSIGN_OR_RETURN(auto of, fs::new_writable_file(_tablet_mgr->del_location(_tablet_id, name)));
+    std::unique_ptr<WritableFile> of;
+    if (_location_provider && _fs) {
+        ASSIGN_OR_RETURN(of, _fs->new_writable_file(_location_provider->del_location(_tablet_id, name)));
+    } else {
+        ASSIGN_OR_RETURN(of, fs::new_writable_file(_tablet_mgr->del_location(_tablet_id, name)));
+    }
     size_t sz = serde::ColumnArraySerde::max_serialized_size(deletes);
     std::vector<uint8_t> content(sz);
     if (serde::ColumnArraySerde::serialize(deletes, content.data()) == nullptr) {

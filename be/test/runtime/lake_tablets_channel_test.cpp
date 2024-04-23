@@ -251,7 +251,6 @@ protected:
     std::unique_ptr<lake::UpdateManager> _update_manager;
     std::unique_ptr<lake::TabletManager> _tablet_manager;
     std::unique_ptr<LoadChannelMgr> _load_channel_mgr;
-    lake::LocationProvider* _backup_location_provider;
     std::shared_ptr<TabletSchema> _tablet_schema;
     std::shared_ptr<Schema> _schema;
     std::shared_ptr<OlapTableSchemaParam> _schema_param;

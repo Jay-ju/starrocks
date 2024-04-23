@@ -1806,7 +1806,7 @@ Status SegmentIterator::_init_bitmap_index_iterators() {
             }
 
             IndexReadOptions opts;
-            opts.use_page_cache = config::enable_bitmap_index_memory_page_cache || !config::disable_storage_page_cache;
+            opts.use_page_cache = _opts.use_page_cache;
             opts.kept_in_memory = config::enable_bitmap_index_memory_page_cache;
             opts.lake_io_opts = _opts.lake_io_opts;
             opts.read_file = _column_files[cid].get();

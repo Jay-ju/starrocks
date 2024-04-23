@@ -16,6 +16,7 @@
 
 #include "storage/lake/tablet_metadata.h"
 #include "storage/primary_key_compaction_conflict_resolver.h"
+#include "storage/tablet_manager.h"
 
 namespace starrocks::lake {
 
@@ -27,12 +28,14 @@ class LakePrimaryIndex;
 class LakePrimaryKeyCompactionConflictResolver : public PrimaryKeyCompactionConflictResolver {
 public:
     explicit LakePrimaryKeyCompactionConflictResolver(const TabletMetadata* metadata, Rowset* rowset,
-                                                      UpdateManager* update_manager, MetaFileBuilder* builder,
-                                                      LakePrimaryIndex* index, int64_t txn_id, int64_t base_version,
+                                                      TabletManager* tablet_mgr, UpdateManager* update_manager,
+                                                      MetaFileBuilder* builder, LakePrimaryIndex* index, int64_t txn_id,
+                                                      int64_t base_version,
                                                       std::map<uint32_t, size_t>* segment_id_to_add_dels,
                                                       std::vector<std::pair<uint32_t, DelVectorPtr>>* delvecs)
             : _metadata(metadata),
               _rowset(rowset),
+              _tablet_mgr(tablet_mgr),
               _update_manager(update_manager),
               _builder(builder),
               _index(index),
@@ -53,6 +56,7 @@ private:
     // input
     const TabletMetadata* _metadata = nullptr;
     Rowset* _rowset = nullptr;
+    TabletManager* _tablet_mgr = nullptr;
     UpdateManager* _update_manager = nullptr;
     MetaFileBuilder* _builder = nullptr;
     LakePrimaryIndex* _index = nullptr;
