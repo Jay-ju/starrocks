@@ -114,6 +114,26 @@ TEST_F(S3FileSystemTest, test_root_directory) {
     ASSERT_ERROR(fs->delete_dir(bucket_root));
 }
 
+TEST_F(S3FileSystemTest, test_cache) {
+    TCloudConfiguration cloud_config;
+    S3ClientFactory client_factory = S3ClientFactory::instance();
+    S3ClientFactory::S3ClientPtr client1 = client_factory.new_client(cloud_config);
+    S3ClientFactory::S3ClientPtr client2 = client_factory.new_client(cloud_config);
+    ASSERT_TRUE(client1 == client2);
+}
+
+TEST_F(S3FileSystemTest, test_retry) {
+    TCloudConfiguration cloud_config;
+    S3URI uri = S3URI.parse("s3://bucket1/path1");
+    std::unordered_map<std::string, std::string> params = {{"fs.s3a.retry.limit", "10"},
+                                                           {"fs.s3a.retry.interval", "10"}};
+    std::unique_ptr<FSOptions> fs_options = std::make_unique<FSOptions>(params);
+
+    S3ClientFactory client_factory = S3ClientFactory::instance();
+    S3ClientFactory::S3ClientPtr client = client_factory.new_client(uri, cloud_config);
+    ASSERT_TRUE(*client);
+}
+
 TEST_F(S3FileSystemTest, test_directory) {
     auto now = ::time(nullptr);
     ASSIGN_OR_ABORT(auto fs, FileSystem::CreateUniqueFromString("s3://"));

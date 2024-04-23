@@ -41,6 +41,14 @@ int32_t DateValue::to_date_literal() const {
     return year * 10000 + month * 100 + day;
 }
 
+// return microseconds since epoch.
+int64_t DateValue::to_unixtime() const {
+    int64_t result = (int64_t)_julian * SECS_PER_DAY;
+    result -= timestamp::UNIX_EPOCH_SECONDS;
+    result *= 1000L;
+    return result;
+}
+
 void DateValue::from_date_literal(int64_t date_literal) {
     _julian = date::from_date_literal(date_literal);
 }

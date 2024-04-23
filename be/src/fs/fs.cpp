@@ -21,7 +21,7 @@
 #include "fs/fs_util.h"
 #include "fs/hdfs/fs_hdfs.h"
 #include "runtime/file_result_writer.h"
-#ifdef USE_STAROS
+#if defined(USE_STAROS) && !defined(BUILD_FORMAT_LIB)
 #include "fs/fs_starlet.h"
 #endif
 
@@ -30,7 +30,7 @@ namespace starrocks {
 static thread_local std::shared_ptr<FileSystem> tls_fs_posix;
 static thread_local std::shared_ptr<FileSystem> tls_fs_s3;
 static thread_local std::shared_ptr<FileSystem> tls_fs_hdfs;
-#ifdef USE_STAROS
+#if defined(USE_STAROS) && !defined(BUILD_FORMAT_LIB)
 static thread_local std::shared_ptr<FileSystem> tls_fs_starlet;
 #endif
 
@@ -55,7 +55,7 @@ inline std::shared_ptr<FileSystem> get_tls_fs_s3() {
     return tls_fs_s3;
 }
 
-#ifdef USE_STAROS
+#if defined(USE_STAROS) && !defined(BUILD_FORMAT_LIB)
 inline std::shared_ptr<FileSystem> get_tls_fs_starlet() {
     if (tls_fs_starlet == nullptr) {
         tls_fs_starlet.reset(new_fs_starlet().release());
@@ -63,6 +63,14 @@ inline std::shared_ptr<FileSystem> get_tls_fs_starlet() {
     return tls_fs_starlet;
 }
 #endif
+
+StatusOr<std::shared_ptr<FileSystem>> FileSystem::Create(std::string_view uri, FSOptions options) {
+    if (!options._fs_options.empty()) {
+        return FileSystem::CreateUniqueFromString(uri, options);
+    } else {
+        return FileSystem::CreateSharedFromString(uri);
+    }
+}
 
 StatusOr<std::unique_ptr<FileSystem>> FileSystem::CreateUniqueFromString(std::string_view uri, FSOptions options) {
     if (fs::is_fallback_to_hadoop_fs(uri)) {
@@ -79,7 +87,7 @@ StatusOr<std::unique_ptr<FileSystem>> FileSystem::CreateUniqueFromString(std::st
         // Now Azure storage and Google Cloud Storage both are using LibHdfs, we can use cpp sdk instead in the future.
         return new_fs_hdfs(options);
     }
-#ifdef USE_STAROS
+#if defined(USE_STAROS) && !defined(BUILD_FORMAT_LIB)
     if (is_starlet_uri(uri)) {
         return new_fs_starlet();
     }
@@ -99,7 +107,7 @@ StatusOr<std::shared_ptr<FileSystem>> FileSystem::CreateSharedFromString(std::st
     if (fs::is_s3_uri(uri)) {
         return get_tls_fs_s3();
     }
-#ifdef USE_STAROS
+#if defined(USE_STAROS) && !defined(BUILD_FORMAT_LIB)
     if (is_starlet_uri(uri)) {
         return get_tls_fs_starlet();
     }
