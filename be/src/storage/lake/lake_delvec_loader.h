@@ -26,14 +26,19 @@ namespace lake {
 
 class LakeDelvecLoader : public DelvecLoader {
 public:
-    LakeDelvecLoader(TabletManager* tablet_manager, const MetaFileBuilder* pk_builder, LakeIOOptions lake_io_opts)
-            : _tablet_manager(tablet_manager), _pk_builder(pk_builder), _lake_io_opts(std::move(lake_io_opts)) {}
+    LakeDelvecLoader(TabletManager* tablet_manager, const MetaFileBuilder* pk_builder, bool fill_cache,
+                     LakeIOOptions lake_io_opts)
+            : _tablet_manager(tablet_manager),
+              _pk_builder(pk_builder),
+              _fill_cache(fill_cache),
+              _lake_io_opts(std::move(lake_io_opts)) {}
     Status load(const TabletSegmentId& tsid, int64_t version, DelVectorPtr* pdelvec);
     Status load_from_file(const TabletSegmentId& tsid, int64_t version, DelVectorPtr* pdelvec);
 
 private:
     TabletManager* _tablet_manager;
     const MetaFileBuilder* _pk_builder = nullptr;
+    bool _fill_cache = false;
     LakeIOOptions _lake_io_opts;
     UpdateManager* _update_mgr;
 };

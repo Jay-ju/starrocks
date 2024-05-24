@@ -284,8 +284,8 @@ void MetaFileBuilder::finalize_sstable_meta(const PersistentIndexSstableMetaPB& 
     _tablet_meta->mutable_sstable_meta()->CopyFrom(sstable_meta);
 }
 
-Status get_del_vec(TabletManager* tablet_mgr, const TabletMetadata& metadata, uint32_t segment_id,
-bool fill_cache, const LakeIOOptions& lake_io_opts, DelVector* delvec) {
+Status get_del_vec(TabletManager* tablet_mgr, const TabletMetadata& metadata, uint32_t segment_id, bool fill_cache,
+                   const LakeIOOptions& lake_io_opts, DelVector* delvec) {
     // find delvec by segment id
     auto iter = metadata.delvec_meta().delvecs().find(segment_id);
     if (iter != metadata.delvec_meta().delvecs().end()) {
@@ -309,14 +309,15 @@ bool fill_cache, const LakeIOOptions& lake_io_opts, DelVector* delvec) {
         }
         const auto& delvec_name = iter2->second.name();
         RandomAccessFileOptions opts{.skip_fill_local_cache = !fill_cache};
-       if (lake_io_opts.fs && lake_io_opts.location_provider) {
-                   ASSIGN_OR_RETURN(
-                           rf, lake_io_opts.fs->new_random_access_file(
-                                       opts, lake_io_opts.location_provider->delvec_location(metadata.id(), delvec_name)));
-               } else {
-                   ASSIGN_OR_RETURN(rf,
-                                    fs::new_random_access_file(opts, tablet_mgr->delvec_location(metadata.id(), delvec_name)));
-               }
+        std::unique_ptr<RandomAccessFile> rf;
+        if (lake_io_opts.fs && lake_io_opts.location_provider) {
+            ASSIGN_OR_RETURN(
+                    rf, lake_io_opts.fs->new_random_access_file(
+                                opts, lake_io_opts.location_provider->delvec_location(metadata.id(), delvec_name)));
+        } else {
+            ASSIGN_OR_RETURN(rf,
+                             fs::new_random_access_file(opts, tablet_mgr->delvec_location(metadata.id(), delvec_name)));
+        }
         RETURN_IF_ERROR(rf->read_at_fully(iter->second.offset(), buf.data(), iter->second.size()));
         // parse delvec
         RETURN_IF_ERROR(delvec->load(iter->second.version(), buf.data(), iter->second.size()));

@@ -122,6 +122,14 @@ TEST_F(S3FileSystemTest, test_cache) {
     ASSERT_TRUE(client1 == client2);
 }
 
+TEST_F(S3FileSystemTest, test_prefetch) {
+    std::unordered_map<std::string, std::string> params = {{"fs.s3a.readahead.range", "100"}};
+    RandomAccessFileOptions opts{.skip_fill_local_cache = true};
+    std::unique_ptr<FSOptions> fs_options = std::make_unique<FSOptions>(params);
+    std::unique_ptr<S3FileSystem> fs = std::make_unique<S3FileSystem>(*fs_options);
+    ASSIGN_OR_ABORT(rf, fs->new_random_access_file(opts, "/tmp/a.file"));
+}
+
 TEST_F(S3FileSystemTest, test_retry) {
     TCloudConfiguration cloud_config;
     S3URI uri = S3URI.parse("s3://bucket1/path1");
