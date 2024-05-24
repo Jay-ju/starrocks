@@ -136,6 +136,8 @@ public class Config extends ConfigBase {
     public static String audit_log_roll_interval = "DAY";
     @ConfField
     public static String audit_log_delete_age = "30d";
+    @ConfField(mutable = true)
+    public static boolean audit_log_json_format = false;
 
     @ConfField(mutable = true)
     public static long slow_lock_threshold_ms = 3000L;
@@ -1837,6 +1839,12 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = true)
     public static boolean statistic_check_expire_partition = true;
+
+    /**
+     * Clear stale partition statistics data job work interval
+     */
+    @ConfField(mutable = true)
+    public static long clear_stale_stats_interval_sec = 12 * 60 * 60L; // 12 hour
 
     /**
      * The collect thread work interval

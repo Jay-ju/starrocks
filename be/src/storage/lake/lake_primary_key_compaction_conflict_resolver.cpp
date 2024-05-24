@@ -50,7 +50,7 @@ Status LakePrimaryKeyCompactionConflictResolver::segment_iterator(
     // init delvec loader
     SegmentReadOptions seg_options;
 
-    auto delvec_loader = std::make_unique<LakeDelvecLoader>(_tablet_mgr, _builder, seg_options.lake_io_opts);
+    auto delvec_loader = std::make_unique<LakeDelvecLoader>(_tablet_mgr, _builder, false /* fill cache */, seg_options.lake_io_opts);
     // init params
     CompactConflictResolveParams params;
     params.tablet_id = _rowset->tablet_id();

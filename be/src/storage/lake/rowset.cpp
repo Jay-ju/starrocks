@@ -81,7 +81,7 @@ StatusOr<std::vector<ChunkIteratorPtr>> Rowset::read(const Schema& schema, const
     seg_options.asc_hint = options.asc_hint;
     if (options.is_primary_keys) {
         seg_options.is_primary_keys = true;
-        seg_options.delvec_loader = std::make_shared<LakeDelvecLoader>(_tablet_mgr, nullptr, seg_options.lake_io_opts);
+        seg_options.delvec_loader = std::make_shared<LakeDelvecLoader>(_tablet_mgr, nullptr, seg_options.lake_io_opts.fill_data_cache, seg_options.lake_io_opts);
         seg_options.version = options.version;
         seg_options.tablet_id = tablet_id();
         seg_options.rowset_id = metadata().id();
@@ -220,7 +220,8 @@ StatusOr<std::vector<ChunkIteratorPtr>> Rowset::get_each_segment_iterator_with_d
     seg_options.lake_io_opts.fs = seg_options.fs;
     seg_options.lake_io_opts.location_provider = _tablet_mgr->location_provider();
     seg_options.is_primary_keys = true;
-    seg_options.delvec_loader = std::make_shared<LakeDelvecLoader>(_tablet_mgr, builder, seg_options.lake_io_opts);
+    seg_options.delvec_loader =
+            std::make_shared<LakeDelvecLoader>(_tablet_mgr, builder, true /*fill cache*/, seg_options.lake_io_opts);
     seg_options.version = version;
     seg_options.tablet_id = tablet_id();
     seg_options.rowset_id = metadata().id();
