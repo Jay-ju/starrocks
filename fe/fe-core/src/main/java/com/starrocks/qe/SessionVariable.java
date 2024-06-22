@@ -65,6 +65,7 @@ import com.starrocks.thrift.TOverflowMode;
 import com.starrocks.thrift.TPipelineProfileLevel;
 import com.starrocks.thrift.TQueryOptions;
 import com.starrocks.thrift.TSpillMode;
+import com.starrocks.thrift.TSpillOptions;
 import com.starrocks.thrift.TSpillToRemoteStorageOptions;
 import com.starrocks.thrift.TTabletInternalParallelMode;
 import com.starrocks.thrift.TTimeUnit;
@@ -193,6 +194,8 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     // spill mode: auto, force
     public static final String SPILL_MODE = "spill_mode";
     public static final String ENABLE_AGG_SPILL_PREAGGREGATION = "enable_agg_spill_preaggregation";
+    public static final String ENABLE_SPILL_BUFFER_READ = "enable_spill_buffer_read";
+    public static final String MAX_SPILL_READ_BUFFER_BYTES_PER_DRIVER = "max_spill_read_buffer_bytes_per_driver";
     // enable table pruning(RBO) in cardinality-preserving joins
     public static final String ENABLE_RBO_TABLE_PRUNE = "enable_rbo_table_prune";
 
@@ -349,6 +352,8 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public static final String CBO_PUSH_DOWN_DISTINCT_BELOW_WINDOW = "cbo_push_down_distinct_below_window";
     public static final String CBO_PUSH_DOWN_AGGREGATE = "cbo_push_down_aggregate";
+    public static final String CBO_PUSH_DOWN_GROUPINGSET = "cbo_push_down_groupingset";
+    public static final String CBO_PUSH_DOWN_GROUPINGSET_RESHUFFLE = "cbo_push_down_groupingset_reshuffle";
     public static final String CBO_DEBUG_ALIVE_BACKEND_NUMBER = "cbo_debug_alive_backend_number";
     public static final String CBO_PRUNE_SUBFIELD = "cbo_prune_subfield";
     public static final String CBO_PRUNE_JSON_SUBFIELD = "cbo_prune_json_subfield";
@@ -464,6 +469,7 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     public static final String ENABLE_POPULATE_DATACACHE = "enable_populate_datacache";
     public static final String ENABLE_DATACACHE_ASYNC_POPULATE_MODE = "enable_datacache_async_populate_mode";
     public static final String ENABLE_DATACACHE_IO_ADAPTOR = "enable_datacache_io_adaptor";
+    public static final String DATACACHE_EVICT_PROBABILITY = "datacache_evict_probability";
 
     // The following configurations will be deprecated, and we use the `datacache` suffix instead.
     // But it is temporarily necessary to keep them for a period of time to be compatible with
@@ -623,6 +629,7 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     public static final String SPILL_OPERATOR_MAX_BYTES = "spill_operator_max_bytes";
     public static final String SPILL_REVOCABLE_MAX_BYTES = "spill_revocable_max_bytes";
     public static final String SPILL_ENABLE_DIRECT_IO = "spill_enable_direct_io";
+    public static final String SPILL_ENABLE_COMPACTION = "spill_enable_compaction";
     // only used in test. spill_mode="RANDOM"
     public static final String SPILL_RAND_RATIO = "spill_rand_ratio";
     public static final String SPILL_ENCODE_LEVEL = "spill_encode_level";
@@ -705,6 +712,10 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public static final String SCAN_HIVE_PARTITION_NUM_LIMIT = "scan_hive_partition_num_limit";
 
+    public static final String ENABLE_CROSS_JOIN = "enable_cross_join";
+
+    public static final String ENABLE_NESTED_LOOP_JOIN = "enable_nested_loop_join";
+
     public static final String AUDIT_EXECUTE_STMT = "audit_execute_stmt";
 
     public static final String CROSS_JOIN_COST_PENALTY = "cross_join_cost_penalty";
@@ -745,6 +756,12 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     public static final String ENABLE_CONNECTOR_SINK_WRITER_SCALING = "enable_connector_sink_writer_scaling";
 
     public static final String ENABLE_CONSTANT_EXECUTE_IN_FE = "enable_constant_execute_in_fe";
+
+    // A group of like predicates with the same column and concatenated by OR, can be consolidated into
+    // regexp predicate, only the number of like predicates is not less that `like_predicate_consolidate_min`
+    // would be consolidated, since when the number of like predicates is too small, its corresponding
+    // regexp predicate is less efficient than like predicates.
+    public static final String LIKE_PREDICATE_CONSOLIDATE_MIN = "like_predicate_consolidate_min";
 
     public static final List<String> DEPRECATED_VARIABLES = ImmutableList.<String>builder()
             .add(CODEGEN_LEVEL)
@@ -996,6 +1013,7 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     @VarAttr(name = CBO_CTE_REUSE)
     private boolean cboCteReuse = true;
 
+    // -1 (< 0): disable cte, force inline. 0: force cte; other (> 0): compute by costs * ratio
     @VarAttr(name = CBO_CTE_REUSE_RATE_V2, flag = VariableMgr.INVISIBLE, alias = CBO_CTE_REUSE_RATE,
             show = CBO_CTE_REUSE_RATE)
     private double cboCTERuseRatio = 1.15;
@@ -1127,8 +1145,17 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     @VarAttr(name = SPILL_RAND_RATIO, flag = VariableMgr.INVISIBLE)
     private double spillRandRatio = 0.1;
 
+    @VarAttr(name = SPILL_ENABLE_COMPACTION, flag = VariableMgr.INVISIBLE)
+    private boolean spillEnableCompaction = true;
+
     @VarAttr(name = ENABLE_AGG_SPILL_PREAGGREGATION, flag = VariableMgr.INVISIBLE)
     public boolean enableAggSpillPreaggregation = true;
+
+    @VarAttr(name = ENABLE_SPILL_BUFFER_READ, flag = VariableMgr.INVISIBLE)
+    public boolean enableSpillBufferRead = true;
+
+    @VarAttr(name = MAX_SPILL_READ_BUFFER_BYTES_PER_DRIVER, flag = VariableMgr.INVISIBLE)
+    public long maxSpillReadBufferBytesPerDriver = 1024 * 1024 * 16;
 
     @VarAttr(name = ENABLE_RBO_TABLE_PRUNE)
     private boolean enableRboTablePrune = false;
@@ -1384,6 +1411,12 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     @VarAttr(name = CBO_PUSH_DOWN_AGGREGATE, flag = VariableMgr.INVISIBLE)
     private String cboPushDownAggregate = "global";
 
+    @VarAttr(name = CBO_PUSH_DOWN_GROUPINGSET, flag = VariableMgr.INVISIBLE)
+    private boolean cboPushDownGroupingSet = true;
+
+    @VarAttr(name = CBO_PUSH_DOWN_GROUPINGSET_RESHUFFLE, flag = VariableMgr.INVISIBLE)
+    private boolean cboPushDownGroupingSetReshuffle = true;
+
     @VariableMgr.VarAttr(name = PARSE_TOKENS_LIMIT)
     private int parseTokensLimit = 3500000;
 
@@ -1575,7 +1608,7 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     }
 
     @VariableMgr.VarAttr(name = ENABLE_SCAN_DATACACHE, alias = ENABLE_SCAN_BLOCK_CACHE)
-    private boolean enableScanDataCache = false;
+    private boolean enableScanDataCache = true;
 
     @VariableMgr.VarAttr(name = ENABLE_POPULATE_DATACACHE, alias = ENABLE_POPULATE_BLOCK_CACHE)
     private boolean enablePopulateDataCache = true;
@@ -1592,10 +1625,17 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     }
 
     @VariableMgr.VarAttr(name = ENABLE_DATACACHE_ASYNC_POPULATE_MODE)
-    private boolean enableDataCacheAsyncPopulateMode = false;
+    private boolean enableDataCacheAsyncPopulateMode = true;
 
     @VariableMgr.VarAttr(name = ENABLE_DATACACHE_IO_ADAPTOR)
-    private boolean enableDataCacheIOAdaptor = false;
+    private boolean enableDataCacheIOAdaptor = true;
+
+    @VariableMgr.VarAttr(name = DATACACHE_EVICT_PROBABILITY, flag = VariableMgr.INVISIBLE)
+    private int datacacheEvictProbability = 100;
+
+    private int datacachePriority = 0;
+
+    private long datacacheTTLSeconds = 0L;
 
     @VariableMgr.VarAttr(name = ENABLE_DYNAMIC_PRUNE_SCAN_RANGE)
     private boolean enableDynamicPruneScanRange = true;
@@ -1902,6 +1942,12 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     @VarAttr(name = SCAN_HIVE_PARTITION_NUM_LIMIT)
     private int scanHivePartitionNumLimit = 0;
 
+    @VarAttr(name = ENABLE_CROSS_JOIN)
+    private boolean enableCrossJoin = true;
+
+    @VarAttr(name = ENABLE_NESTED_LOOP_JOIN)
+    private boolean enableNestedLoopJoin = true;
+
     @VariableMgr.VarAttr(name = AUDIT_EXECUTE_STMT)
     private boolean auditExecuteStmt = false;
 
@@ -2124,6 +2170,8 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     @VarAttr(name = ENABLE_CONSTANT_EXECUTE_IN_FE)
     private boolean enableConstantExecuteInFE = true;
 
+    @VarAttr(name = LIKE_PREDICATE_CONSOLIDATE_MIN)
+    private int likePredicateConsolidateMin = 2;
     public int getExprChildrenLimit() {
         return exprChildrenLimit;
     }
@@ -2225,6 +2273,18 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public void setEnableDataCacheIOAdaptor(boolean enableDataCacheIOAdaptor) {
         this.enableDataCacheIOAdaptor = enableDataCacheIOAdaptor;
+    }
+
+    public void setDataCacheEvictProbability(int datacacheEvictProbability) {
+        this.datacacheEvictProbability = datacacheEvictProbability;
+    }
+
+    public void setDataCachePriority(int dataCachePriority) {
+        this.datacachePriority = dataCachePriority;
+    }
+
+    public void setDatacacheTTLSeconds(long datacacheTTLSeconds) {
+        this.datacacheTTLSeconds = datacacheTTLSeconds;
     }
 
     public boolean isCboUseDBLock() {
@@ -2611,10 +2671,6 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public long getSpillOperatorMinBytes() {
         return this.spillOperatorMinBytes;
-    }
-
-    public long getSpillOperatorMaxBytes() {
-        return this.spillOperatorMaxBytes;
     }
 
     public int getSpillEncodeLevel() {
@@ -3122,6 +3178,7 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
         return singleNodeExecPlan;
     }
 
+    // -1 (< 0): disable cte, force inline. 0: force cte; other (> 0): compute by costs * ratio
     public double getCboCTERuseRatio() {
         return cboCTERuseRatio;
     }
@@ -3144,6 +3201,22 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public void setCboPushDownAggregate(String cboPushDownAggregate) {
         this.cboPushDownAggregate = cboPushDownAggregate;
+    }
+
+    public boolean isCboPushDownGroupingSet() {
+        return cboPushDownGroupingSet;
+    }
+
+    public void setCboPushDownGroupingSet(boolean cboPushDownGroupingSet) {
+        this.cboPushDownGroupingSet = cboPushDownGroupingSet;
+    }
+
+    public boolean isCboPushDownGroupingSetReshuffle() {
+        return cboPushDownGroupingSetReshuffle;
+    }
+
+    public void setCboPushDownGroupingSetReshuffle(boolean cboPushDownGroupingSetReshuffle) {
+        this.cboPushDownGroupingSetReshuffle = cboPushDownGroupingSetReshuffle;
     }
 
     public void setCboPushDownDistinctBelowWindow(boolean flag) {
@@ -3696,6 +3769,22 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
         this.scanHivePartitionNumLimit = scanHivePartitionNumLimit;
     }
 
+    public boolean isEnableCrossJoin() {
+        return enableCrossJoin;
+    }
+
+    public void setEnableCrossJoin(boolean enableCrossJoin) {
+        this.enableCrossJoin = enableCrossJoin;
+    }
+
+    public boolean isEnableNestedLoopJoin() {
+        return enableNestedLoopJoin;
+    }
+
+    public void setEnableNestedLoopJoin(boolean enableNestedLoopJoin) {
+        this.enableNestedLoopJoin = enableNestedLoopJoin;
+    }
+
     public boolean enableCboDeriveRangeJoinPredicate() {
         return cboDeriveRangeJoinPredicate;
     }
@@ -3851,6 +3940,14 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
         this.enableConstantExecuteInFE = enableConstantExecuteInFE;
     }
 
+    public int getLikePredicateConsolidateMin() {
+        return likePredicateConsolidateMin;
+    }
+
+    public void setLikePredicateConsolidateMin(int value) {
+        this.likePredicateConsolidateMin = value;
+    }
+
     // Serialize to thrift object
     // used for rest api
     public TQueryOptions toThrift() {
@@ -3883,33 +3980,39 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
         tResult.setEnable_spill(enableSpill);
         if (enableSpill) {
-            tResult.setSpill_mem_table_size(spillMemTableSize);
-            tResult.setSpill_mem_table_num(spillMemTableNum);
-            tResult.setSpill_mem_limit_threshold(spillMemLimitThreshold);
-            tResult.setSpill_operator_min_bytes(spillOperatorMinBytes);
-            tResult.setSpill_operator_max_bytes(spillOperatorMaxBytes);
-            tResult.setSpill_revocable_max_bytes(spillRevocableMaxBytes);
-            tResult.setSpill_encode_level(spillEncodeLevel);
-            tResult.setSpillable_operator_mask(spillableOperatorMask);
-            tResult.setEnable_agg_spill_preaggregation(enableAggSpillPreaggregation);
-            tResult.setSpill_enable_direct_io(spillEnableDirectIO);
-            tResult.setSpill_rand_ratio(spillRandRatio);
+            TSpillOptions spillOptions = new TSpillOptions();
+            spillOptions.setSpill_mem_table_size(spillMemTableSize);
+            spillOptions.setSpill_mem_table_num(spillMemTableNum);
+            spillOptions.setSpill_mem_limit_threshold(spillMemLimitThreshold);
+            spillOptions.setSpill_operator_min_bytes(spillOperatorMinBytes);
+            spillOptions.setSpill_operator_max_bytes(spillOperatorMaxBytes);
+            spillOptions.setSpill_revocable_max_bytes(spillRevocableMaxBytes);
+            spillOptions.setSpill_encode_level(spillEncodeLevel);
+            spillOptions.setSpillable_operator_mask(spillableOperatorMask);
+            spillOptions.setEnable_agg_spill_preaggregation(enableAggSpillPreaggregation);
+            spillOptions.setSpill_enable_direct_io(spillEnableDirectIO);
+            spillOptions.setSpill_rand_ratio(spillRandRatio);
+            spillOptions.setSpill_enable_compaction(spillEnableCompaction);
+            spillOptions.setSpill_mode(TSpillMode.valueOf(spillMode.toUpperCase()));
+            spillOptions.setEnable_spill_buffer_read(enableSpillBufferRead);
+            spillOptions.setMax_spill_read_buffer_bytes_per_driver(maxSpillReadBufferBytesPerDriver);
             if (enableSpillToRemoteStorage && !spillStorageVolume.isEmpty()) {
                 // find storage volume config
                 GlobalStateMgr globalStateMgr = GlobalStateMgr.getCurrentState();
                 StorageVolumeMgr storageVolumeMgr = globalStateMgr.getStorageVolumeMgr();
                 StorageVolume sv = storageVolumeMgr.getStorageVolumeByName(spillStorageVolume);
                 if (sv != null) {
-                    tResult.setEnable_spill_to_remote_storage(true);
+                    spillOptions.setEnable_spill_to_remote_storage(true);
                     TSpillToRemoteStorageOptions options = new TSpillToRemoteStorageOptions();
                     options.setRemote_storage_paths(sv.getLocations());
                     TCloudConfiguration tCloudConfiguration = new TCloudConfiguration();
                     sv.getCloudConfiguration().toThrift(tCloudConfiguration);
                     options.setRemote_storage_conf(tCloudConfiguration);
                     options.setDisable_spill_to_local_disk(disableSpillToLocalDisk);
-                    tResult.setSpill_to_remote_storage_options(options);
+                    spillOptions.setSpill_to_remote_storage_options(options);
                 }
             }
+            tResult.setSpill_options(spillOptions);
         }
 
         // Compression Type
@@ -3950,7 +4053,6 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
         tResult.setTablet_internal_parallel_mode(
                 TTabletInternalParallelMode.valueOf(tabletInternalParallelMode.toUpperCase()));
-        tResult.setSpill_mode(TSpillMode.valueOf(spillMode.toUpperCase()));
         tResult.setEnable_query_debug_trace(enableQueryDebugTrace);
         tResult.setEnable_pipeline_query_statistic(true);
         tResult.setRuntime_filter_early_return_selectivity(runtimeFilterEarlyReturnSelectivity);
@@ -3961,6 +4063,9 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
         tResult.setEnable_populate_datacache(enablePopulateDataCache);
         tResult.setEnable_datacache_async_populate_mode(enableDataCacheAsyncPopulateMode);
         tResult.setEnable_datacache_io_adaptor(enableDataCacheIOAdaptor);
+        tResult.setDatacache_evict_probability(datacacheEvictProbability);
+        tResult.setDatacache_priority(datacachePriority);
+        tResult.setDatacache_ttl_seconds(datacacheTTLSeconds);
         tResult.setEnable_file_metacache(enableFileMetaCache);
         tResult.setHudi_mor_force_jni_reader(hudiMORForceJNIReader);
         tResult.setIo_tasks_per_scan_operator(ioTasksPerScanOperator);

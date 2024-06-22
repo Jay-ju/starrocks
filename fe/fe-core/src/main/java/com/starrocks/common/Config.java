@@ -264,11 +264,11 @@ public class Config extends ConfigBase {
     @ConfField
     public static String profile_log_dir = StarRocksFE.STARROCKS_HOME_DIR + "/log";
     @ConfField
-    public static int profile_log_roll_num = 10;
+    public static int profile_log_roll_num = 5;
     @ConfField
     public static String profile_log_roll_interval = "DAY";
     @ConfField
-    public static String profile_log_delete_age = "7d";
+    public static String profile_log_delete_age = "1d";
     @ConfField
     public static int profile_log_roll_size_mb = 1024; // 1 GB in MB
 
@@ -693,6 +693,12 @@ public class Config extends ConfigBase {
     @ConfField
     public static int http_max_chunk_size = 8192;
 
+    // Because the new version of netty has a stricter headers validation,
+    // so the validation is turned off here to be compatible with old users
+    // https://github.com/netty/netty/pull/12760
+    @ConfField
+    public static boolean enable_http_validate_headers = false;
+
     /**
      * If a request takes longer than the configured time, a log will be generated to trace it.
      */
@@ -1073,6 +1079,12 @@ public class Config extends ConfigBase {
     public static int alter_max_worker_queue_size = 4096;
 
     /**
+     * Online optimize table allows to optimize a table without blocking write operations.
+     */
+    @ConfField(mutable = true)
+    public static boolean enable_online_optimize_table = true;
+
+    /**
      * If set to true, FE will check backend available capacity by storage medium when create table
      * <p>
      * The default value should better set to true because if user
@@ -1186,6 +1198,12 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = true)
     public static boolean enable_materialized_view = true;
+
+    /**
+     * control materialized view refresh order
+     */
+    @ConfField(mutable = true)
+    public static boolean materialized_view_refresh_ascending = true;
 
     /**
      * Control whether to enable spill for all materialized views in the refresh mv.
@@ -1366,7 +1384,7 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static boolean disable_load_job = false;
 
-    /*
+    /**
      * One master daemon thread will update database used data quota for db txn manager
      * every db_used_data_quota_update_interval_secs
      */
@@ -1404,6 +1422,20 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = true, aliases = {"disable_colocate_balance"})
     public static boolean tablet_sched_disable_colocate_balance = false;
+
+    /**
+     * Colocate balance is a very time-consuming operation,
+     * and our system should try to avoid triggering colocate balance.
+     * In the some situation, customers will stop all machines when the cluster is not in use to save machine resources.
+     * When the machine is started again, unnecessary colocate balance
+     * will be triggered due to the inconsistent start time of the machines.
+     * To avoid this situation, we introduced the tablet_sched_colocate_balance_after_system_stable_time_s parameter.
+     * If the status(alive and decommissioned) of all backend can maintain consistency within
+     * tablet_sched_colocate_balance_after_system_stable_time_s, then the colocate balance will be triggered.
+     * Default value is 15min.
+     */
+    @ConfField(mutable = true)
+    public static long tablet_sched_colocate_balance_wait_system_stable_time_s = 15 * 60;
 
     /**
      * When setting to true, disable the overall balance behavior for colocate groups which treats all the groups
@@ -1458,8 +1490,10 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static long tablet_sched_colocate_be_down_tolerate_time_s = 12L * 3600L;
 
-    // if the number of balancing tablets in TabletScheduler exceed max_balancing_tablets,
-    // no more balance check
+    /**
+     * If the number of balancing tablets in TabletScheduler exceed max_balancing_tablets,
+     * no more balance check
+     */
     @ConfField(mutable = true, aliases = {"max_balancing_tablets"})
     public static int tablet_sched_max_balancing_tablets = 500;
 
@@ -1706,8 +1740,10 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static String authentication_ldap_simple_bind_root_pwd = "";
 
-    // For forward compatibility, will be removed later.
-    // check token when download image file.
+    /**
+     * For forward compatibility, will be removed later.
+     * check token when download image file.
+     */
     @ConfField
     public static boolean enable_token_check = true;
 
@@ -2029,7 +2065,7 @@ public class Config extends ConfigBase {
      * The interval of lazy refreshing hive metastore cache
      */
     @ConfField
-    public static long hive_meta_cache_refresh_interval_s = 3600L * 2L;
+    public static long hive_meta_cache_refresh_interval_s = 60;
 
     /**
      * Hive metastore cache ttl
@@ -2508,6 +2544,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int lake_compaction_default_timeout_second = 86400; // 1 day
 
+    @ConfField(mutable = true)
+    public static boolean lake_compaction_allow_partial_success = false;
+
     @ConfField(mutable = true, comment = "the max number of previous version files to keep")
     public static int lake_autovacuum_max_previous_versions = 0;
 
@@ -2896,7 +2935,7 @@ public class Config extends ConfigBase {
      * Whether to use table level lock
      */
     @ConfField
-    public static boolean lock_manager_enable_using_fine_granularity_lock = false;
+    public static boolean lock_manager_enable_using_fine_granularity_lock = true;
 
     @ConfField(mutable = true)
     public static long routine_load_unstable_threshold_second = 3600;

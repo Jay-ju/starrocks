@@ -103,6 +103,7 @@ import com.starrocks.planner.FileScanNode;
 import com.starrocks.planner.HiveTableSink;
 import com.starrocks.planner.OlapScanNode;
 import com.starrocks.planner.PlanFragment;
+import com.starrocks.planner.PlanNodeId;
 import com.starrocks.planner.ScanNode;
 import com.starrocks.privilege.AccessDeniedException;
 import com.starrocks.privilege.ObjectType;
@@ -118,6 +119,7 @@ import com.starrocks.sql.ExplainAnalyzer;
 import com.starrocks.sql.PrepareStmtPlanner;
 import com.starrocks.sql.StatementPlanner;
 import com.starrocks.sql.analyzer.AnalyzerUtils;
+import com.starrocks.sql.analyzer.AstToSQLBuilder;
 import com.starrocks.sql.analyzer.AstToStringBuilder;
 import com.starrocks.sql.analyzer.Authorizer;
 import com.starrocks.sql.analyzer.Field;
@@ -164,6 +166,7 @@ import com.starrocks.sql.ast.UpdateStmt;
 import com.starrocks.sql.ast.UseCatalogStmt;
 import com.starrocks.sql.ast.UseDbStmt;
 import com.starrocks.sql.ast.UserVariable;
+import com.starrocks.sql.common.AuditEncryptionChecker;
 import com.starrocks.sql.common.DmlException;
 import com.starrocks.sql.common.ErrorType;
 import com.starrocks.sql.common.MetaUtils;
@@ -454,6 +457,12 @@ public class StmtExecutor {
         context.setExecutionId(UUIDUtil.toTUniqueId(uuid));
         SessionVariable sessionVariableBackup = context.getSessionVariable();
 
+        // Only add the last running stmt for multi statement,
+        // because the audit log will only show the last stmt.
+        if (context.getIsLastStmt()) {
+            addRunningQueryDetail(parsedStmt);
+        }
+
         // if use http protocal, use httpResultSender to send result to netty channel
         if (context instanceof HttpConnectContext) {
             httpResultSender = new HttpResultSender((HttpConnectContext) context);
@@ -467,6 +476,10 @@ public class StmtExecutor {
             if (parsedStmt.isExistQueryScopeHint()) {
                 processQueryScopeHint();
             }
+
+            // set warehouse for auditLog
+            context.getAuditEventBuilder().setWarehouse(context.getCurrentWarehouseName());
+            LOG.debug("set warehouse {} for stmt: {}", context.getCurrentWarehouseName(), parsedStmt);
 
             if (parsedStmt.isExplain()) {
                 context.setExplainLevel(parsedStmt.getExplainLevel());
@@ -618,10 +631,23 @@ public class StmtExecutor {
                             isAsync = tryProcessProfileAsync(execPlan, i);
                             if (parsedStmt.isExplain() &&
                                     StatementBase.ExplainLevel.ANALYZE.equals(parsedStmt.getExplainLevel())) {
+                                if (coord.isShortCircuit()) {
+                                    throw new UserException(
+                                            "short circuit point query doesn't suppot explain analyze stmt, " +
+                                                    "you can set it off by using  set enable_short_circuit=false");
+                                }
                                 handleExplainStmt(ExplainAnalyzer.analyze(
                                         ProfilingExecPlan.buildFrom(execPlan), profile, null));
                             }
                         }
+
+                        if (context.getState().isError()) {
+                            RuntimeProfile plannerProfile = new RuntimeProfile("Planner");
+                            Tracers.toRuntimeProfile(plannerProfile);
+                            LOG.warn("Query {} failed. Planner profile : {}",
+                                    context.getQueryId().toString(), plannerProfile);
+                        }
+
                         if (isAsync) {
                             QeProcessorImpl.INSTANCE.monitorQuery(context.getExecutionId(), System.currentTimeMillis() +
                                     context.getSessionVariable().getProfileTimeout() * 1000L);
@@ -896,7 +922,12 @@ public class StmtExecutor {
                 summaryProfile.addInfoString(ProfileManager.RETRY_TIMES, Integer.toString(retryIndex + 1));
             }
 
-            ProfilingExecPlan profilingPlan = plan == null ? null : plan.getProfilingPlan();
+            ProfilingExecPlan profilingPlan;
+            if (coord.isShortCircuit()) {
+                profilingPlan = null;
+            } else {
+                profilingPlan = plan == null ? null : plan.getProfilingPlan();
+            }
             String profileContent = ProfileManager.getInstance().pushProfile(profilingPlan, profile);
             if (queryDetail != null) {
                 queryDetail.setProfile(profileContent);
@@ -1212,12 +1243,17 @@ public class StmtExecutor {
         sendShowResult(resultSet);
     }
 
-    private void handleAnalyzeProfileStmt() throws IOException {
+    private void handleAnalyzeProfileStmt() throws IOException, UserException {
         AnalyzeProfileStmt analyzeProfileStmt = (AnalyzeProfileStmt) parsedStmt;
         String queryId = analyzeProfileStmt.getQueryId();
         List<Integer> planNodeIds = analyzeProfileStmt.getPlanNodeIds();
         ProfileManager.ProfileElement profileElement = ProfileManager.getInstance().getProfileElement(queryId);
         Preconditions.checkNotNull(profileElement, "query not exists");
+        if (coord.isShortCircuit()) {
+            throw new UserException(
+                    "short circuit point query doesn't suppot analyze profile stmt, " +
+                            "you can set it off by using  set enable_short_circuit=false");
+        }
         handleExplainStmt(ExplainAnalyzer.analyze(profileElement.plan,
                 RuntimeProfileParser.parseFrom(CompressionUtils.gzipDecompressString(profileElement.profileContent)),
                 planNodeIds));
@@ -2202,12 +2238,38 @@ public class StmtExecutor {
                         Coordinator.getCommitInfos(coord), Coordinator.getFailInfos(coord), null);
                 txnStatus = TransactionStatus.ABORTED;
             } else {
+                InsertTxnCommitAttachment attachment = null;
+                if (stmt instanceof InsertStmt) {
+                    InsertStmt insertStmt = (InsertStmt) stmt;
+                    if (insertStmt.isVersionOverwrite()) {
+                        Map<Long, Long> partitionVersionMap = Maps.newHashMap();
+                        Map<PlanNodeId, ScanNode> scanNodeMap = execPlan.getFragments().get(0).collectScanNodes();
+                        for (Map.Entry<PlanNodeId, ScanNode> entry : scanNodeMap.entrySet()) {
+                            if (entry.getValue() instanceof OlapScanNode) {
+                                OlapScanNode olapScanNode = (OlapScanNode) entry.getValue();
+                                partitionVersionMap.putAll(olapScanNode.getScanPartitionVersions());
+                            }
+                        }
+                        Preconditions.checkState(partitionVersionMap.size() <= 1);
+                        if (partitionVersionMap.size() == 1) {
+                            attachment = new InsertTxnCommitAttachment(
+                                    loadedRows, partitionVersionMap.values().iterator().next());
+                        } else if (partitionVersionMap.size() == 0) {
+                            attachment = new InsertTxnCommitAttachment(loadedRows);
+                        }
+                        LOG.debug("insert overwrite txn {} with partition version map {}", transactionId, partitionVersionMap);
+                    } else {
+                        attachment = new InsertTxnCommitAttachment(loadedRows);
+                    }
+                } else {
+                    attachment = new InsertTxnCommitAttachment(loadedRows);
+                }
                 VisibleStateWaiter visibleWaiter = transactionMgr.retryCommitOnRateLimitExceeded(
                         database,
                         transactionId,
                         TabletCommitInfo.fromThrift(coord.getCommitInfos()),
                         TabletFailInfo.fromThrift(coord.getFailInfos()),
-                        new InsertTxnCommitAttachment(loadedRows),
+                        attachment,
                         jobDeadLineMs - System.currentTimeMillis());
 
                 long publishWaitMs = Config.enable_sync_publish ? jobDeadLineMs - System.currentTimeMillis() :
@@ -2359,7 +2421,7 @@ public class StmtExecutor {
                 }
             } while (!batch.isEos());
         } catch (Exception e) {
-            LOG.warn(e);
+            LOG.warn("Failed to execute executeStmtWithExecPlan", e);
             coord.getExecStatus().setInternalErrorStatus(e.getMessage());
         } finally {
             QeProcessorImpl.INSTANCE.unregisterQuery(context.getExecutionId());
@@ -2433,5 +2495,35 @@ public class StmtExecutor {
                 QeProcessorImpl.INSTANCE.unregisterQuery(context.getExecutionId());
             }
         }
+    }
+
+    protected void addRunningQueryDetail(StatementBase parsedStmt) {
+        if (!Config.enable_collect_query_detail_info) {
+            return;
+        }
+        String sql;
+        if (AuditEncryptionChecker.needEncrypt(parsedStmt)) {
+            sql = AstToSQLBuilder.toSQL(parsedStmt);
+        } else {
+            sql = parsedStmt.getOrigStmt().originStmt;
+        }
+
+        boolean isQuery = parsedStmt instanceof QueryStatement;
+        QueryDetail queryDetail = new QueryDetail(
+                DebugUtil.printId(context.getQueryId()),
+                isQuery,
+                context.connectionId,
+                context.getMysqlChannel() != null ? context.getMysqlChannel().getRemoteIp() : "System",
+                context.getStartTime(), -1, -1,
+                QueryDetail.QueryMemState.RUNNING,
+                context.getDatabase(),
+                sql,
+                context.getQualifiedUser(),
+                Optional.ofNullable(context.getResourceGroup()).map(TWorkGroup::getName).orElse(""),
+                context.getCurrentWarehouseName(),
+                context.getCurrentCatalog());
+        context.setQueryDetail(queryDetail);
+        // copy queryDetail, cause some properties can be changed in future
+        QueryDetailQueue.addQueryDetail(queryDetail.copy());
     }
 }

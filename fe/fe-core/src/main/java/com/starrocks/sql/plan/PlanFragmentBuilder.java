@@ -201,6 +201,7 @@ import com.starrocks.thrift.TBrokerFileStatus;
 import com.starrocks.thrift.TPartitionType;
 import com.starrocks.thrift.TResultSinkType;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.lang3.NotImplementedException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -685,7 +686,7 @@ public class PlanFragmentBuilder {
             Optional.ofNullable(optExpression.getStatistics()).ifPresent(statistics -> {
                 Statistics.Builder b = Statistics.builder();
                 b.setOutputRowCount(statistics.getOutputRowCount());
-                b.addColumnStatisticsFromOtherStatistic(statistics, new ColumnRefSet(node.getOutputColumns()));
+                b.addColumnStatisticsFromOtherStatistic(statistics, new ColumnRefSet(node.getOutputColumns()), true);
                 projectNode.computeStatistics(b.build());
             });
 
@@ -1087,8 +1088,7 @@ public class PlanFragmentBuilder {
                 prepareMinMaxExpr(scanNodePredicates, predicates, context);
 
             } catch (Exception e) {
-                LOG.warn("Hudi scan node get scan range locations failed : " + e);
-                LOG.warn(e);
+                LOG.warn("Hudi scan node get scan range locations failed : ", e);
                 throw new StarRocksPlannerException(e.getMessage(), INTERNAL_ERROR);
             }
 
@@ -1130,7 +1130,7 @@ public class PlanFragmentBuilder {
                 prepareCommonExpr(scanNodePredicates, predicates, context);
                 prepareMinMaxExpr(scanNodePredicates, predicates, context);
             } catch (Exception e) {
-                LOG.warn("Hdfs scan node get scan range locations failed : " + e);
+                LOG.warn("Hdfs scan node get scan range locations failed : ", e);
                 throw new StarRocksPlannerException(e.getMessage(), INTERNAL_ERROR);
             }
 
@@ -1215,7 +1215,7 @@ public class PlanFragmentBuilder {
                 prepareCommonExpr(scanNodePredicates, node.getScanOperatorPredicates(), context);
                 prepareMinMaxExpr(scanNodePredicates, node.getScanOperatorPredicates(), context);
             } catch (AnalysisException e) {
-                LOG.warn("Delta lake scan node get scan range locations failed : " + e);
+                LOG.warn("Delta lake scan node get scan range locations failed : ", e);
                 throw new StarRocksPlannerException(e.getMessage(), INTERNAL_ERROR);
             }
 
@@ -1259,7 +1259,7 @@ public class PlanFragmentBuilder {
                 prepareMinMaxExpr(scanNodePredicates, node.getScanOperatorPredicates(), context);
                 prepareCommonExpr(scanNodePredicates, node.getScanOperatorPredicates(), context);
             } catch (Exception e) {
-                LOG.warn("Paimon scan node get scan range locations failed : " + e);
+                LOG.warn("Paimon scan node get scan range locations failed : ", e);
                 throw new StarRocksPlannerException(e.getMessage(), INTERNAL_ERROR);
             }
 
@@ -1352,7 +1352,7 @@ public class PlanFragmentBuilder {
                 prepareMinMaxExpr(scanNodePredicates, node.getScanOperatorPredicates(), context);
                 prepareCommonExpr(scanNodePredicates, node.getScanOperatorPredicates(), context);
             } catch (Exception e) {
-                LOG.warn("Kudu scan node get scan range locations failed : " + e);
+                LOG.warn("Kudu scan node get scan range locations failed : ", e);
                 throw new StarRocksPlannerException(e.getMessage(), INTERNAL_ERROR);
             }
 
@@ -1402,7 +1402,7 @@ public class PlanFragmentBuilder {
                 HDFSScanNodePredicates scanNodePredicates = icebergScanNode.getScanNodePredicates();
                 prepareMinMaxExpr(scanNodePredicates, node.getScanOperatorPredicates(), context);
             } catch (UserException e) {
-                LOG.warn("Iceberg scan node get scan range locations failed : " + e);
+                LOG.warn("Iceberg scan node get scan range locations failed : ", e);
                 throw new StarRocksPlannerException(e.getMessage(), INTERNAL_ERROR);
             }
 
@@ -2077,6 +2077,10 @@ public class PlanFragmentBuilder {
 
             Map<ColumnRefOperator, CallOperator> aggregations = node.getAggregations();
             List<ColumnRefOperator> groupBys = node.getGroupBys();
+            if (MapUtils.isEmpty(aggregations) && CollectionUtils.isEmpty(groupBys)) {
+                throw new StarRocksPlannerException(INTERNAL_ERROR, "invalid agg operator " +
+                        "without any group by key or agg function. OptExpression:\n%s", optExpr.debugString(5));
+            }
             List<ColumnRefOperator> partitionBys = node.getPartitionByColumns();
             boolean hasRemovedDistinct = node.hasRemovedDistinctFunc();
 

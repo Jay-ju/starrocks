@@ -52,7 +52,6 @@ import com.starrocks.common.profile.Tracers;
 import com.starrocks.common.util.AuditStatisticsUtil;
 import com.starrocks.common.util.DebugUtil;
 import com.starrocks.common.util.RuntimeProfile;
-import com.starrocks.common.util.concurrent.FairReentrantLock;
 import com.starrocks.connector.exception.RemoteFileNotFoundException;
 import com.starrocks.datacache.DataCacheSelectMetrics;
 import com.starrocks.mysql.MysqlCommand;
@@ -102,10 +101,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -125,7 +124,7 @@ public class DefaultCoordinator extends Coordinator {
     /**
      * Protects all the fields below.
      */
-    private final Lock lock = new FairReentrantLock();
+    private final Lock lock = new ReentrantLock();
 
     /**
      * Overall status of the entire query.
@@ -261,7 +260,7 @@ public class DefaultCoordinator extends Coordinator {
         FragmentInstanceExecState execState = FragmentInstanceExecState.createFakeExecution(queryId, address);
         executionDAG.addExecution(execState);
 
-        this.queryProfile = new QueryRuntimeProfile(connectContext, jobSpec, 1);
+        this.queryProfile = new QueryRuntimeProfile(connectContext, jobSpec, 1, false);
         queryProfile.attachInstances(Collections.singletonList(queryId));
         queryProfile.attachExecutionProfiles(executionDAG.getExecutions());
 
@@ -276,7 +275,6 @@ public class DefaultCoordinator extends Coordinator {
         this.coordinatorPreprocessor = new CoordinatorPreprocessor(context, jobSpec);
         this.executionDAG = coordinatorPreprocessor.getExecutionDAG();
 
-        this.queryProfile = new QueryRuntimeProfile(connectContext, jobSpec, executionDAG.getFragmentsInCreatedOrder().size());
         List<PlanFragment> fragments = jobSpec.getFragments();
         List<ScanNode> scanNodes = jobSpec.getScanNodes();
         TDescriptorTable descTable = jobSpec.getDescTable();
@@ -285,12 +283,16 @@ public class DefaultCoordinator extends Coordinator {
             isBinaryRow = true;
         }
 
-        shortCircuitExecutor = ShortCircuitExecutor.create(context, fragments, scanNodes, descTable,
-                isBinaryRow, jobSpec.isNeedReport(), jobSpec.getPlanProtocol());
+        shortCircuitExecutor =
+                ShortCircuitExecutor.create(context, fragments, scanNodes, descTable, isBinaryRow, jobSpec.isNeedReport(),
+                        jobSpec.getPlanProtocol(), coordinatorPreprocessor.getWorkerProvider());
 
         if (null != shortCircuitExecutor) {
             isShortCircuit = true;
         }
+
+        this.queryProfile = new QueryRuntimeProfile(connectContext, jobSpec, executionDAG.getFragmentsInCreatedOrder().size(),
+                isShortCircuit);
     }
 
     @Override
@@ -416,6 +418,11 @@ public class DefaultCoordinator extends Coordinator {
     @Override
     public boolean isUsingBackend(Long backendID) {
         return coordinatorPreprocessor.getWorkerProvider().isWorkerSelected(backendID);
+    }
+
+    @Override
+    public boolean isShortCircuit() {
+        return isShortCircuit;
     }
 
     private void lock() {
@@ -1005,7 +1012,10 @@ public class DefaultCoordinator extends Coordinator {
 
             // Waiting for other fragment instances to finish execState
             // Ideally, it should wait indefinitely, but out of defense, set timeout
-            queryProfile.waitForProfileFinished(timeout, TimeUnit.SECONDS);
+            boolean isFinished = queryProfile.waitForProfileFinished(timeout, TimeUnit.SECONDS);
+            if (!isFinished) {
+                LOG.warn("failed to get profile within {} seconds", timeout);
+            }
         }
 
         lock();
@@ -1017,7 +1027,7 @@ public class DefaultCoordinator extends Coordinator {
     }
 
     public boolean tryProcessProfileAsync(Consumer<Boolean> task) {
-        if (executionDAG.getExecutions().isEmpty()) {
+        if (executionDAG.getExecutions().isEmpty() && (!isShortCircuit)) {
             return false;
         }
         if (!jobSpec.isNeedReport()) {
@@ -1062,9 +1072,10 @@ public class DefaultCoordinator extends Coordinator {
         final long fixedMaxWaitTime = 5;
 
         long leftTimeoutS = timeoutS;
+        boolean awaitRes = false;
         while (leftTimeoutS > 0) {
             long waitTime = Math.min(leftTimeoutS, fixedMaxWaitTime);
-            boolean awaitRes = queryProfile.waitForProfileFinished(waitTime, TimeUnit.SECONDS);
+            awaitRes = queryProfile.waitForProfileFinished(waitTime, TimeUnit.SECONDS);
             if (awaitRes) {
                 return true;
             }
@@ -1080,11 +1091,19 @@ public class DefaultCoordinator extends Coordinator {
 
             leftTimeoutS -= waitTime;
         }
+
+        if (!awaitRes) {
+            LOG.warn("failed to get profile within {} seconds", timeoutS);
+        }
         return false;
     }
 
+    // build execution profile  from every BE's report
     @Override
     public RuntimeProfile buildQueryProfile(boolean needMerge) {
+        if (isShortCircuit) {
+            return shortCircuitExecutor.buildQueryProfile(needMerge);
+        }
         return queryProfile.buildQueryProfile(needMerge);
     }
 
@@ -1152,13 +1171,7 @@ public class DefaultCoordinator extends Coordinator {
         return connectContext.getSessionVariable().getWarehouseName();
     }
 
-    private void execShortCircuit() {
+    private void execShortCircuit() throws Exception {
         shortCircuitExecutor.exec();
-        Optional<RuntimeProfile> runtimeProfile = shortCircuitExecutor.getRuntimeProfile();
-        if (jobSpec.isNeedReport() && runtimeProfile.isPresent()) {
-            RuntimeProfile profile = runtimeProfile.get();
-            profile.setName("Short Circuit Executor");
-            queryProfile.getQueryProfile().addChild(profile);
-        }
     }
 }

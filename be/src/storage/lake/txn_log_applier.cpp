@@ -114,6 +114,14 @@ public:
     }
 
     Status finish() override {
+        // still need prepre primary index even there is an empty compaction
+        if (_index_entry == nullptr && _has_empty_compaction) {
+            // get lock to avoid gc
+            _tablet.update_mgr()->lock_shard_pk_index_shard(_tablet.id());
+            DeferOp defer([&]() { _tablet.update_mgr()->unlock_shard_pk_index_shard(_tablet.id()); });
+            RETURN_IF_ERROR(prepare_primary_index());
+        }
+
         // Must call `commit` before `finalize`,
         // because if `commit` or `finalize` fail, we can remove index in `handle_failure`.
         // if `_index_entry` is null, do nothing.
@@ -129,6 +137,10 @@ public:
 private:
     bool need_recover(const Status& st) { return _builder.recover_flag() != RecoverFlag::OK; }
     bool need_re_publish(const Status& st) { return _builder.recover_flag() == RecoverFlag::RECOVER_WITH_PUBLISH; }
+    bool is_column_mode_partial_update(const TxnLogPB_OpWrite& op_write) const {
+        // TODO support COLUMN_UPSERT_MODE
+        return op_write.txn_meta().partial_update_mode() == PartialUpdateMode::COLUMN_UPDATE_MODE;
+    }
 
     Status check_and_recover(const std::function<Status()>& publish_func) {
         auto ret = publish_func();
@@ -159,23 +171,33 @@ private:
         return ret;
     }
 
+    // We call `prepare_primary_index` only when first time we apply `write_log` or `compaction_log`, instead of
+    // in `TxnLogApplier.init`, because we have to build primary index after apply `schema_change_log` finish.
+    Status prepare_primary_index() {
+        if (_index_entry == nullptr) {
+            ASSIGN_OR_RETURN(_index_entry, _tablet.update_mgr()->prepare_primary_index(
+                                                   _metadata, &_builder, _base_version, _new_version, _guard));
+        }
+        return Status::OK();
+    }
+
     Status apply_write_log(const TxnLogPB_OpWrite& op_write, int64_t txn_id) {
         // get lock to avoid gc
         _tablet.update_mgr()->lock_shard_pk_index_shard(_tablet.id());
         DeferOp defer([&]() { _tablet.update_mgr()->unlock_shard_pk_index_shard(_tablet.id()); });
 
-        // We call `prepare_primary_index` only when first time we apply `write_log` or `compaction_log`, instead of
-        // in `TxnLogApplier.init`, because we have to build primary index after apply `schema_change_log` finish.
-        if (_index_entry == nullptr) {
-            ASSIGN_OR_RETURN(_index_entry, _tablet.update_mgr()->prepare_primary_index(
-                                                   _metadata, &_builder, _base_version, _new_version, _guard));
-        }
+        RETURN_IF_ERROR(prepare_primary_index());
         if (op_write.dels_size() == 0 && op_write.rowset().num_rows() == 0 &&
             !op_write.rowset().has_delete_predicate()) {
             return Status::OK();
         }
-        return _tablet.update_mgr()->publish_primary_key_tablet(op_write, txn_id, *_metadata, &_tablet, _index_entry,
-                                                                &_builder, _base_version);
+        if (is_column_mode_partial_update(op_write)) {
+            return _tablet.update_mgr()->publish_column_mode_partial_update(op_write, txn_id, _metadata, &_tablet,
+                                                                            &_builder, _base_version);
+        } else {
+            return _tablet.update_mgr()->publish_primary_key_tablet(op_write, txn_id, _metadata, &_tablet, _index_entry,
+                                                                    &_builder, _base_version);
+        }
     }
 
     Status apply_compaction_log(const TxnLogPB_OpCompaction& op_compaction, int64_t txn_id) {
@@ -183,12 +205,7 @@ private:
         _tablet.update_mgr()->lock_shard_pk_index_shard(_tablet.id());
         DeferOp defer([&]() { _tablet.update_mgr()->unlock_shard_pk_index_shard(_tablet.id()); });
 
-        // We call `prepare_primary_index` only when first time we apply `write_log` or `compaction_log`, instead of
-        // in `TxnLogApplier.init`, because we have to build primary index after apply `schema_change_log` finish.
-        if (_index_entry == nullptr) {
-            ASSIGN_OR_RETURN(_index_entry, _tablet.update_mgr()->prepare_primary_index(
-                                                   _metadata, &_builder, _base_version, _new_version, _guard));
-        }
+        RETURN_IF_ERROR(prepare_primary_index());
         if (op_compaction.input_rowsets().empty()) {
             DCHECK(!op_compaction.has_output_rowset() || op_compaction.output_rowset().num_rows() == 0);
             return Status::OK();

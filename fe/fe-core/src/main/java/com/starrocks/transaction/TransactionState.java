@@ -49,7 +49,6 @@ import com.starrocks.common.Config;
 import com.starrocks.common.TraceManager;
 import com.starrocks.common.UserException;
 import com.starrocks.common.io.Writable;
-import com.starrocks.common.util.concurrent.FairReentrantReadWriteLock;
 import com.starrocks.metric.MetricRepo;
 import com.starrocks.proto.TxnTypePB;
 import com.starrocks.server.GlobalStateMgr;
@@ -79,8 +78,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import javax.annotation.Nullable;
 import javax.validation.constraints.NotNull;
@@ -343,9 +340,8 @@ public class TransactionState implements Writable {
     // Therefore, a snapshot of this information is maintained here.
     private ConcurrentMap<String, TOlapTablePartition> partitionNameToTPartition = Maps.newConcurrentMap();
     private ConcurrentMap<Long, TTabletLocation> tabletIdToTTabletLocation = Maps.newConcurrentMap();
-    private Map<String, Lock> createPartitionLocks = Maps.newHashMap();
 
-    private final ReentrantReadWriteLock txnLock = new FairReentrantReadWriteLock();
+    private final ReentrantReadWriteLock txnLock = new ReentrantReadWriteLock(true);
 
     public void writeLock() {
         if (Config.lock_manager_enable_using_fine_granularity_lock) {
@@ -716,6 +712,11 @@ public class TransactionState implements Writable {
         this.txnCommitAttachment = txnCommitAttachment;
     }
 
+    public boolean isVersionOverwrite() {
+        return txnCommitAttachment instanceof InsertTxnCommitAttachment
+                && ((InsertTxnCommitAttachment) txnCommitAttachment).getIsVersionOverwrite();
+    }
+
     // return true if txn is in final status and label is expired
     public boolean isExpired(long currentMillis) {
         return transactionStatus.isFinalStatus() && (currentMillis - finishTime) / 1000 > Config.label_keep_max_second;
@@ -877,6 +878,9 @@ public class TransactionState implements Writable {
         for (PartitionCommitInfo commitInfo : partitionCommitInfos) {
             TPartitionVersionInfo version = new TPartitionVersionInfo(commitInfo.getPartitionId(),
                     commitInfo.getVersion(), 0);
+            if (commitInfo.isDoubleWrite()) {
+                version.setIs_double_write(true);
+            }
             partitionVersions.add(version);
         }
 
@@ -893,7 +897,8 @@ public class TransactionState implements Writable {
                     createTime,
                     this,
                     Config.enable_sync_publish,
-                    this.getTxnType());
+                    this.getTxnType(),
+                    isVersionOverwrite());
             this.addPublishVersionTask(backendId, task);
             tasks.add(task);
         }
@@ -1015,28 +1020,6 @@ public class TransactionState implements Writable {
     public void clearAutomaticPartitionSnapshot() {
         partitionNameToTPartition.clear();
         tabletIdToTTabletLocation.clear();
-    }
-
-    public void lockCreatePartition(String partitionName) {
-        Lock locker = null;
-        synchronized (createPartitionLocks) {
-            locker = createPartitionLocks.get(partitionName);
-            if (locker == null) {
-                locker = new ReentrantLock();
-                createPartitionLocks.put(partitionName, locker);
-            }
-        }
-        locker.lock();
-    }
-
-    public void unlockCreatePartition(String partitionName) {
-        Lock locker = null;
-        synchronized (createPartitionLocks) {
-            locker = createPartitionLocks.get(partitionName);
-        }
-        if (locker != null) {
-            locker.unlock();
-        }
     }
 
     @Override

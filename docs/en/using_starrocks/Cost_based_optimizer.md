@@ -159,7 +159,7 @@ You can rely on automatic jobs for a majority of statistics collection, but if y
 
 ### Manual collection
 
-You can use ANALYZE TABLE to create a manual collection task. By default, manual collection is a synchronous operation. You can also set it to an asynchronous operation. In asynchronous mode, after you run ANALYZE TABLE, the system immediately returns whether this statement is successful. However, the collection task will be running in the background and you do not have to wait for the result. You can check the status of the task by running SHOW ANALYZE STATUS. Asynchronous collection is suitable for tables with large data volume, whereas synchronous collection is suitable for tables with small data volume. **Manual collection tasks are run only once after creation. You do not need to delete manual collection tasks.**
+You can use ANALYZE TABLE to create a manual collection task. By default, manual collection is a synchronous operation. You can also set it to an asynchronous operation. In asynchronous mode, after you run ANALYZE TABLE, the system immediately returns whether this statement is successful. However, the collection task will be running in the background and you do not have to wait for the result. You can check the status of the task by running SHOW ANALYZE STATUS. Asynchronous collection is suitable for tables with large data volume, whereas synchronous collection is suitable for tables with small data volume. **Manual collection tasks are run only once after creation. You do not need to delete manual collection tasks.** You must have the INSERT and SELECT privileges on the coreesponding table to perform the ANALYZE TABLE operation.
 
 #### Manually collect basic statistics
 
@@ -262,7 +262,7 @@ PROPERTIES(
 
 #### Customize an automatic collection task
 
-You can use the CREATE ANALYZE statement to customize an automatic collection task.
+You can use the CREATE ANALYZE statement to customize an automatic collection task. You must have the INSERT and SELECT privileges on the coreesponding table to perform the ANALYZE TABLE operation.
 
 Before creating a custom automatic collection task, you must disable automatic full collection (`enable_collect_full_statistic = false`). Otherwise, custom tasks cannot take effect.
 
@@ -284,7 +284,7 @@ Parameter description:
 - Collection type
   - FULL: indicates full collection.
   - SAMPLE: indicates sampled collection.
-  - If no collection type is specified, full collection is used by default.
+  - If no collection type is specified, sample collection is used by default.
 
 - `col_name`: columns from which to collect statistics. Separate multiple columns with commas (`,`). If this parameter is not specified, the entire table is collected.
 
@@ -488,7 +488,7 @@ The task ID for a manual collection task can be obtained from SHOW ANALYZE STATU
 
 ## Collect statistics of Hive/Iceberg/Hudi tables
 
-Since v3.2.0, StarRocks supports collecting statistics of Hive, Iceberg, and Hudi tables. The syntax is similar to collecting StarRocks internal tables. **However, only manual full collection, manual histogram collection (since v3.3.0), and automatic full collection are supported. Sampled collection is not supported.** Since v3.3.0, StarRocks supports collecting statistics of sub-fields in STRUCT.
+Since v3.2.0, StarRocks supports collecting statistics of Hive, Iceberg, and Hudi tables. The syntax is similar to collecting StarRocks internal tables. **However, only manual full collection, manual histogram collection (since v3.2.7), and automatic full collection are supported. Sampled collection is not supported.** Since v3.3.0, StarRocks supports collecting statistics of sub-fields in STRUCT.
 
 The collected statistics are stored in the `external_column_statistics` table of the `_statistics_` in the `default_catalog`. They are not stored in Hive Metastore and cannot be shared by other search engines. You can query data from the `default_catalog._statistics_.external_column_statistics` table to verify whether statistics are collected for a Hive/Iceberg/Hudi table.
 
@@ -517,7 +517,7 @@ partition_name:
 The following limits apply when you collect statistics for Hive, Iceberg, Hudi tables:
 
 1. You can collect statistics of only Hive, Iceberg, and Hudi tables.
-2. Only manual full collection, manual histogram collection (since v3.3.0), and automatic full collection are supported. Sampled collection is not supported.
+2. Only manual full collection, manual histogram collection (since v3.2.7), and automatic full collection are supported. Sampled collection is not supported.
 3. For the system to automatically collect full statistics, you must create an Analyze job, which is different from collecting statistics of StarRocks internal tables where the system does this in the background by default.
 4. For automatic collection tasks, you can only collect statistics of a specific table. You cannot collect statistics of all tables in a database or statistics of all databases in an external catalog.
 5. For automatic collection tasks, StarRocks can detect whether data in Hive and Iceberg tables are updated and if so, collect statistics of only partitions whose data is updated. StarRocks cannot perceive whether data in Hudi tables are updated and can only perform periodic full collection.
@@ -612,7 +612,7 @@ You can view the task ID in the output of SHOW ANALYZE STATUS.
 
 For the system to automatically collect statistics of tables in an external data source, you can create an Analyze job. StarRocks automatically checks whether to run the task at the default check interval of 5 minutes. For Hive and Iceberg tables, StarRocks runs a collection task only when data in the tables are updated.
 
-However, data changes in Hudi tables cannot be perceived and StarRocks periodically collects statistics based on the check interval and collection interval you specified. You can specify the following properties when you create an Analyze job:
+However, data changes in Hudi tables cannot be perceived and StarRocks periodically collects statistics based on the check interval and collection interval you specified. You can specify the following FE configuration items to control the collection behaviors:
 
 - statistic_collect_interval_sec
 
@@ -642,6 +642,8 @@ Syntax:
 CREATE ANALYZE TABLE tbl_name (col_name [,col_name])
 [PROPERTIES (property [,property])]
 ```
+
+You can specify the property `statistic_auto_collect_interval` to set the collection interval exclusively for the automatic collection task. The FE configuration items `statistic_auto_collect_small_table_interval` and `statistic_auto_collect_large_table_interval` will not take effect on this task.
 
 Example:
 

@@ -42,11 +42,6 @@ public:
         _reader->get_levels(def_levels, rep_levels, num_levels);
     }
 
-    Status get_dict_values(const std::vector<int32_t>& dict_codes, const NullableColumn& nulls,
-                           Column* column) override {
-        return _reader->get_dict_values(dict_codes, nulls, column);
-    }
-
     void set_need_parse_levels(bool need_parse_levels) override { _reader->set_need_parse_levels(need_parse_levels); }
 
     bool try_to_use_dict_filter(ExprContext* ctx, bool is_decode_needed, const SlotId slotId,
@@ -68,7 +63,7 @@ public:
         return _dict_filter_ctx->predicate->evaluate_and(column.get(), filter->data());
     }
 
-    Status fill_dst_column(ColumnPtr& dst, const ColumnPtr& src) override;
+    Status fill_dst_column(ColumnPtr& dst, ColumnPtr& src) override;
 
     void collect_column_io_range(std::vector<io::SharedBufferedInputStream::IORange>* ranges, int64_t* end_offset,
                                  ColumnIOType type, bool active) override;
@@ -119,6 +114,7 @@ private:
     bool _need_lazy_decode = false;
     // dict code
     ColumnPtr _dict_code = nullptr;
+    ColumnPtr _ori_column = nullptr;
 };
 
 } // namespace starrocks::parquet

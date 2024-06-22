@@ -40,6 +40,7 @@ import com.starrocks.analysis.HintNode;
 import com.starrocks.analysis.InPredicate;
 import com.starrocks.analysis.InformationFunction;
 import com.starrocks.analysis.IsNullPredicate;
+import com.starrocks.analysis.LargeStringLiteral;
 import com.starrocks.analysis.LikePredicate;
 import com.starrocks.analysis.LimitElement;
 import com.starrocks.analysis.LiteralExpr;
@@ -802,16 +803,7 @@ public class AstToStringBuilder {
             StringBuilder sb = new StringBuilder();
             sb.append(FileTableFunctionRelation.IDENTIFIER);
             sb.append("(");
-            boolean first = true;
-            for (Map.Entry<String, String> entry : node.getProperties().entrySet()) {
-                if (!first) {
-                    sb.append(",");
-                }
-                first = false;
-                sb.append("'").append(entry.getKey()).append("'");
-                sb.append("=");
-                sb.append("'").append((entry.getValue())).append("'");
-            }
+            sb.append(new PrintableMap<String, String>(node.getProperties(), "=", true, false, true));
             sb.append(")");
             return sb.toString();
         }
@@ -1162,6 +1154,8 @@ public class AstToStringBuilder {
                 } else {
                     return visitExpression(node, context);
                 }
+            } else if (node instanceof LargeStringLiteral) {
+                return ((LargeStringLiteral) node).toFullSqlImpl();
             } else {
                 return visitExpression(node, context);
             }

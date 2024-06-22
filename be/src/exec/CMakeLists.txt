@@ -37,6 +37,7 @@ set(EXEC_FILES
     tablet_sink_index_channel.cpp
     tablet_sink_sender.cpp
     write_combined_txn_log.cpp
+    multi_olap_table_sink.cpp
     mysql_scanner.cpp
     es/es_predicate.cpp
     es/es_scan_reader.cpp
@@ -293,6 +294,7 @@ set(EXEC_FILES
     spill/serde.cpp
     spill/input_stream.cpp
     spill/data_stream.cpp
+    spill/block_reader.cpp
     spill/log_block_manager.cpp
     spill/file_block_manager.cpp
     spill/hybird_block_manager.cpp

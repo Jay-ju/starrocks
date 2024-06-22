@@ -126,6 +126,7 @@ struct TScalarType {
 struct TStructField {
     1: optional string name
     2: optional string comment
+    3: optional i32 id
 }
 
 struct TTypeNode {
@@ -277,7 +278,10 @@ enum TFunctionBinaryType {
   IR,
 
   // StarRocks customized UDF in jar.
-  SRJAR
+  SRJAR,
+  
+  // 
+  PYTHON
 }
 
 // Represents a fully qualified function name.
@@ -366,6 +370,8 @@ struct TFunction {
   // Ignore nulls
   33: optional bool ignore_nulls
   34: optional bool isolated
+  35: optional string input_type
+  36: optional string content
 }
 
 enum TLoadJobState {

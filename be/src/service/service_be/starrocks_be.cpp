@@ -53,7 +53,8 @@ DECLARE_bool(socket_keepalive);
 namespace starrocks {
 
 Status init_datacache(GlobalEnv* global_env, const std::vector<StorePath>& storage_paths) {
-    if (!config::datacache_enable && config::block_cache_enable) {
+    // When configured old `block_cache` configurations, use the old items for compatibility.
+    if (config::block_cache_enable) {
         config::datacache_enable = true;
         config::datacache_mem_size = std::to_string(config::block_cache_mem_size);
         config::datacache_disk_size = std::to_string(config::block_cache_disk_size);
@@ -96,6 +97,15 @@ Status init_datacache(GlobalEnv* global_env, const std::vector<StorePath>& stora
         }
         RETURN_IF_ERROR(parse_conf_datacache_disk_spaces(config::datacache_disk_path, config::datacache_disk_size,
                                                          config::ignore_broken_disk, &cache_options.disk_spaces));
+
+        size_t total_quota_byts = 0;
+        for (auto& space : cache_options.disk_spaces) {
+            total_quota_byts += space.size;
+        }
+        if (total_quota_byts == 0) {
+            // If disk cache quota is zero, turn on the automatic adjust switch.
+            config::datacache_auto_adjust_enable = true;
+        }
 
         // Adjust the default engine based on build switches.
         if (config::datacache_engine == "") {

@@ -218,7 +218,7 @@ TEST_P(LakePartialUpdateTest, test_write) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -239,20 +239,40 @@ TEST_P(LakePartialUpdateTest, test_write) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
+        if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+            EXPECT_TRUE(_update_mgr->update_state_mem_tracker()->consumption() == 0);
+        } else {
+            EXPECT_TRUE(_update_mgr->update_state_mem_tracker()->consumption() > 0);
+        }
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
         version++;
         ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+        if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+            if (i == 0) {
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+            } else {
+                // move old .cols files into orphan files.
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+            }
+        } else {
+            EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+        }
     }
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 3 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 3);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+    }
+    EXPECT_TRUE(_update_mgr->update_state_mem_tracker()->consumption() == 0);
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::LOCAL) {
         check_local_persistent_index_meta(tablet_id, version);
     }
@@ -281,8 +301,9 @@ TEST_P(LakePartialUpdateTest, test_write_multi_segment) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
+        EXPECT_TRUE(_update_mgr->update_state_mem_tracker()->consumption() > 0);
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
         version++;
@@ -304,24 +325,39 @@ TEST_P(LakePartialUpdateTest, test_write_multi_segment) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
         version++;
         ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+        if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+            if (i == 0) {
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+            } else {
+                // move old .cols into orphan files.
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 3);
+            }
+        } else {
+            EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+        }
     }
     config::write_buffer_size = old_size;
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 3 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
-    // check segment size in last metadata
-    EXPECT_EQ(new_tablet_metadata->rowsets(5).segments_size(), 2);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 3);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+        // check segment size in last metadata
+        EXPECT_EQ(new_tablet_metadata->rowsets(5).segments_size(), 2);
+    }
+    EXPECT_TRUE(_update_mgr->update_state_mem_tracker()->consumption() == 0);
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::LOCAL) {
         check_local_persistent_index_meta(tablet_id, version);
     }
@@ -351,7 +387,7 @@ TEST_P(LakePartialUpdateTest, test_write_multi_segment_by_diff_val) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -374,24 +410,38 @@ TEST_P(LakePartialUpdateTest, test_write_multi_segment_by_diff_val) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
         ASSERT_OK(delta_writer->write(chunk2, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
         version++;
         ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+        if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+            if (i == 0) {
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+            } else {
+                // move old .cols into orphan files.
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 3);
+            }
+        } else {
+            EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+        }
     }
     config::write_buffer_size = old_size;
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 6 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
-    // check segment size in last metadata
-    EXPECT_EQ(new_tablet_metadata->rowsets(5).segments_size(), 2);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 3);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+        // check segment size in last metadata
+        EXPECT_EQ(new_tablet_metadata->rowsets(5).segments_size(), 2);
+    }
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::LOCAL) {
         check_local_persistent_index_meta(tablet_id, version);
     }
@@ -420,7 +470,7 @@ TEST_P(LakePartialUpdateTest, test_resolve_conflict) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -443,10 +493,11 @@ TEST_P(LakePartialUpdateTest, test_resolve_conflict) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
     }
     // publish in order
@@ -455,11 +506,15 @@ TEST_P(LakePartialUpdateTest, test_resolve_conflict) {
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
         version++;
         ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+        if (GetParam().partial_update_mode != PartialUpdateMode::COLUMN_UPDATE_MODE) {
+            EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+        }
     }
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 5 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+    if (GetParam().partial_update_mode != PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+    }
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::LOCAL) {
         check_local_persistent_index_meta(tablet_id, version);
     }
@@ -489,7 +544,7 @@ TEST_P(LakePartialUpdateTest, test_resolve_conflict_multi_segment) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -514,11 +569,12 @@ TEST_P(LakePartialUpdateTest, test_resolve_conflict_multi_segment) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
         ASSERT_OK(delta_writer->write(chunk2, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
     }
     // publish in order
@@ -530,9 +586,13 @@ TEST_P(LakePartialUpdateTest, test_resolve_conflict_multi_segment) {
     config::write_buffer_size = old_size;
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 6 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
-    // check segment size in last metadata
-    EXPECT_EQ(new_tablet_metadata->rowsets(5).segments_size(), 2);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 3);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+        // check segment size in last metadata
+        EXPECT_EQ(new_tablet_metadata->rowsets(5).segments_size(), 2);
+    }
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::LOCAL) {
         check_local_persistent_index_meta(tablet_id, version);
     }
@@ -561,7 +621,7 @@ TEST_P(LakePartialUpdateTest, test_resolve_conflict2) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -592,20 +652,34 @@ TEST_P(LakePartialUpdateTest, test_resolve_conflict2) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
         version++;
         ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+        if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+            if (i == 0) {
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+            } else {
+                // move old .cols into orphan files.
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+            }
+        } else {
+            EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+        }
     }
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 5 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 5);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 3);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 5);
+    }
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::LOCAL) {
         check_local_persistent_index_meta(tablet_id, version);
     }
@@ -634,7 +708,7 @@ TEST_P(LakePartialUpdateTest, test_write_with_index_reload) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -658,28 +732,41 @@ TEST_P(LakePartialUpdateTest, test_write_with_index_reload) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
         version++;
         ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+        if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+            if (i == 0) {
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+            } else {
+                // move old .cols into orphan files.
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+            }
+        } else {
+            EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 1);
+        }
     }
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 3 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 3);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+    }
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::LOCAL) {
         check_local_persistent_index_meta(tablet_id, version);
     }
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::CLOUD_NATIVE) {
         auto sstable_meta = new_tablet_metadata->sstable_meta();
         for (auto& sstable : sstable_meta.sstables()) {
-            EXPECT_GT(sstable.version(), 0);
-            EXPECT_LE(sstable.version(), version);
+            EXPECT_GT(sstable.max_rss_rowid(), 0);
         }
     }
 }
@@ -708,7 +795,7 @@ TEST_P(LakePartialUpdateTest, test_partial_update_publish_retry) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -729,10 +816,11 @@ TEST_P(LakePartialUpdateTest, test_partial_update_publish_retry) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
 
         SyncPoint::GetInstance()->SetCallBack("ProtobufFile::save:serialize", [](void* arg) { *(bool*)arg = false; });
@@ -771,7 +859,7 @@ TEST_P(LakePartialUpdateTest, test_concurrent_write_publish) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -789,10 +877,11 @@ TEST_P(LakePartialUpdateTest, test_concurrent_write_publish) {
                                                        .set_mem_tracker(_mem_tracker.get())
                                                        .set_schema_id(_tablet_schema->id())
                                                        .set_slot_descriptors(&_slot_pointers)
+                                                       .set_partial_update_mode(GetParam().partial_update_mode)
                                                        .build());
             ASSERT_OK(delta_writer->open());
             ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-            ASSERT_OK(delta_writer->finish());
+            ASSERT_OK(delta_writer->finish_with_txnlog());
             delta_writer->close();
             ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id1).status());
             version++;
@@ -815,11 +904,12 @@ TEST_P(LakePartialUpdateTest, test_concurrent_write_publish) {
                                                        .set_mem_tracker(_mem_tracker.get())
                                                        .set_schema_id(_tablet_schema->id())
                                                        .set_slot_descriptors(&_slot_pointers)
+                                                       .set_partial_update_mode(GetParam().partial_update_mode)
                                                        .build());
             ASSERT_OK(delta_writer->open());
             ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
             ASSERT_OK(delta_writer->write(chunk2, indexes.data(), indexes.size()));
-            ASSERT_OK(delta_writer->finish());
+            ASSERT_OK(delta_writer->finish_with_txnlog());
             delta_writer->close();
             config::write_buffer_size = old_size;
             config::l0_max_mem_usage = old_mem_usage;
@@ -851,7 +941,7 @@ TEST_P(LakePartialUpdateTest, test_batch_publish) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -873,10 +963,11 @@ TEST_P(LakePartialUpdateTest, test_batch_publish) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
     }
     auto new_version = base_version + 3;
@@ -884,8 +975,14 @@ TEST_P(LakePartialUpdateTest, test_batch_publish) {
     ASSERT_OK(batch_publish(tablet_id, base_version, new_version, txn_ids).status());
 
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, new_version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 4);
-    EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 3);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 1);
+        // 3 .dat + 2 .cols
+        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 5);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 4);
+        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 3);
+    }
     _tablet_mgr->prune_metacache();
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 3 == c1) && (c0 * 4 == c2); }));
     _update_mgr->try_remove_primary_index_cache(tablet_id);
@@ -894,13 +991,27 @@ TEST_P(LakePartialUpdateTest, test_batch_publish) {
     ASSERT_OK(batch_publish(tablet_id, base_version, new_version, txn_ids).status());
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 3 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, new_version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 4);
-    EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 3);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 1);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 4);
+    }
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        // 3 .dat + 2 .cols
+        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 5);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 3);
+    }
 }
 
-INSTANTIATE_TEST_SUITE_P(LakePartialUpdateTest, LakePartialUpdateTest,
-                         ::testing::Values(PrimaryKeyParam{true}, PrimaryKeyParam{false},
-                                           PrimaryKeyParam{true, PersistentIndexTypePB::CLOUD_NATIVE}));
+INSTANTIATE_TEST_SUITE_P(
+        LakePartialUpdateTest, LakePartialUpdateTest,
+        ::testing::Values(PrimaryKeyParam{true}, PrimaryKeyParam{false},
+                          PrimaryKeyParam{true, PersistentIndexTypePB::CLOUD_NATIVE},
+                          PrimaryKeyParam{.enable_persistent_index = true,
+                                          .partial_update_mode = PartialUpdateMode::COLUMN_UPDATE_MODE},
+                          PrimaryKeyParam{.enable_persistent_index = false,
+                                          .partial_update_mode = PartialUpdateMode::COLUMN_UPDATE_MODE}));
 
 class LakeIncompleteSortKeyPartialUpdateTest : public TestBase {
 public:
@@ -1035,6 +1146,7 @@ TEST_F(LakeIncompleteSortKeyPartialUpdateTest, test_incomplete_sort_key) {
 
 TEST_P(LakePartialUpdateTest, test_partial_update_retry_rewrite_check) {
     if (GetParam().enable_persistent_index) return;
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) return;
     auto chunk0 = generate_data(kChunkSize, 0, false, 3);
     auto chunk1 = generate_data(kChunkSize, 0, true, 5);
     auto indexes = std::vector<uint32_t>(kChunkSize);
@@ -1057,7 +1169,7 @@ TEST_P(LakePartialUpdateTest, test_partial_update_retry_rewrite_check) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -1083,7 +1195,7 @@ TEST_P(LakePartialUpdateTest, test_partial_update_retry_rewrite_check) {
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
     }
     // retry publish again
@@ -1139,7 +1251,7 @@ TEST_P(LakePartialUpdateTest, test_write_multi_segment_by_diff_val_mem_limit) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -1164,25 +1276,38 @@ TEST_P(LakePartialUpdateTest, test_write_multi_segment_by_diff_val_mem_limit) {
                                                    .set_mem_tracker(_mem_tracker.get())
                                                    .set_schema_id(_tablet_schema->id())
                                                    .set_slot_descriptors(&_slot_pointers)
+                                                   .set_partial_update_mode(GetParam().partial_update_mode)
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
         ASSERT_OK(delta_writer->write(chunk2, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
         version++;
         ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-        EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+        if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+            if (i == 0) {
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+            } else {
+                EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 3);
+            }
+        } else {
+            EXPECT_EQ(new_tablet_metadata->orphan_files_size(), 2);
+        }
     }
     config::write_buffer_size = old_size;
     _update_mgr->update_state_mem_tracker()->set_limit(old_limit);
     ASSERT_EQ(kChunkSize, check(version, [](int c0, int c1, int c2) { return (c0 * 6 == c1) && (c0 * 4 == c2); }));
     ASSIGN_OR_ABORT(new_tablet_metadata, _tablet_mgr->get_tablet_metadata(tablet_id, version));
-    EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
-    // check segment size in last metadata
-    EXPECT_EQ(new_tablet_metadata->rowsets(5).segments_size(), 2);
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 3);
+    } else {
+        EXPECT_EQ(new_tablet_metadata->rowsets_size(), 6);
+        // check segment size in last metadata
+        EXPECT_EQ(new_tablet_metadata->rowsets(5).segments_size(), 2);
+    }
     if (GetParam().enable_persistent_index && GetParam().persistent_index_type == PersistentIndexTypePB::LOCAL) {
         check_local_persistent_index_meta(tablet_id, version);
     }
@@ -1190,6 +1315,7 @@ TEST_P(LakePartialUpdateTest, test_write_multi_segment_by_diff_val_mem_limit) {
 
 TEST_P(LakePartialUpdateTest, test_partial_update_retry_check_file_exist) {
     if (GetParam().enable_persistent_index) return;
+    if (GetParam().partial_update_mode == PartialUpdateMode::COLUMN_UPDATE_MODE) return;
     auto chunk0 = generate_data(kChunkSize, 0, false, 3);
     auto chunk1 = generate_data(kChunkSize, 0, true, 5);
     auto indexes = std::vector<uint32_t>(kChunkSize);
@@ -1212,7 +1338,7 @@ TEST_P(LakePartialUpdateTest, test_partial_update_retry_check_file_exist) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -1238,7 +1364,7 @@ TEST_P(LakePartialUpdateTest, test_partial_update_retry_check_file_exist) {
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
     }
     // retry because put meta fail
@@ -1437,7 +1563,7 @@ TEST_P(LakePartialUpdateConcurrentSchemaEvolutionTest, test) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk0, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
         // Publish version
         ASSERT_OK(publish_single_version(tablet_id, version + 1, txn_id).status());
@@ -1457,7 +1583,7 @@ TEST_P(LakePartialUpdateConcurrentSchemaEvolutionTest, test) {
                                                    .build());
         ASSERT_OK(delta_writer->open());
         ASSERT_OK(delta_writer->write(chunk1, indexes.data(), indexes.size()));
-        ASSERT_OK(delta_writer->finish());
+        ASSERT_OK(delta_writer->finish_with_txnlog());
         delta_writer->close();
     }
     // Update tablet schema

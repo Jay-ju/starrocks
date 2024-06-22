@@ -852,6 +852,7 @@ CONF_Int32(orc_loading_buffer_size, "8388608");
 CONF_mBool(parquet_coalesce_read_enable, "true");
 CONF_Bool(parquet_late_materialization_enable, "true");
 CONF_Bool(parquet_page_index_enable, "true");
+CONF_mBool(parquet_statistics_process_more_filter_enable, "true");
 
 CONF_Int32(io_coalesce_read_max_buffer_size, "8388608");
 CONF_Int32(io_coalesce_read_max_distance_size, "1048576");
@@ -888,7 +889,7 @@ CONF_String(aws_sdk_logging_trace_level, "trace");
 // to Authenticate because the request URL does not translate these special characters.
 // This is critical for Hive partitioned tables. The object key usually contains '=' like 'dt=20230101'.
 // Enabling RFC-3986 encoding will make sure these characters are properly encoded.
-CONF_mBool(aws_sdk_enable_compliant_rfc3986_encoding, "false");
+CONF_Bool(aws_sdk_enable_compliant_rfc3986_encoding, "false");
 
 // default: 16MB
 CONF_mInt64(experimental_s3_max_single_part_size, "16777216");
@@ -991,7 +992,9 @@ CONF_mInt64(lake_pk_compaction_min_input_segments, "5");
 // Used for control memory usage of update state cache and compaction state cache
 CONF_mInt32(lake_pk_preload_memory_limit_percent, "30");
 CONF_mInt32(lake_pk_index_sst_min_compaction_versions, "2");
-CONF_mInt32(lake_pk_index_sst_max_compaction_bytes, /*1GB*/ "1073741824");
+CONF_mInt32(lake_pk_index_sst_max_compaction_versions, "100");
+// When the ratio of cumulative level to base level is greater than this config, use base merge.
+CONF_mDouble(lake_pk_index_cumulative_base_compaction_ratio, "0.1");
 CONF_Int32(lake_pk_index_block_cache_limit_percent, "10");
 
 CONF_mBool(dependency_librdkafka_debug_enable, "false");
@@ -1037,6 +1040,8 @@ CONF_Int64(spill_max_log_block_container_bytes, "10737418240"); // 10GB
 // be the same with storage path. Spill will return with error when used size has exceeded
 // the limit.
 CONF_mDouble(spill_max_dir_bytes_ratio, "0.8"); // 80%
+// min bytes size of spill read buffer. if the buffer size is less than this value, we will disable buffer read
+CONF_Int64(spill_read_buffer_min_bytes, "1048576");
 
 CONF_Int32(internal_service_query_rpc_thread_num, "-1");
 
@@ -1061,7 +1066,7 @@ CONF_mInt64(max_length_for_to_base64, "200000");
 CONF_mInt64(max_length_for_bitmap_function, "1000000");
 
 // Configuration items for datacache
-CONF_Bool(datacache_enable, "false");
+CONF_Bool(datacache_enable, "true");
 CONF_mString(datacache_mem_size, "0");
 CONF_mString(datacache_disk_size, "0");
 CONF_mString(datacache_disk_path, "");
@@ -1101,19 +1106,21 @@ CONF_mInt32(report_datacache_metrics_interval_ms, "60000");
 // Whether enable automatically adjust cache space quota.
 // If true, the cache will choose an appropriate quota based on the current remaining space as the quota.
 // and the quota also will be changed dynamiclly.
-// Once the disk space usage reach the urgent level, the quota will be decreased to keep the disk usage
+// Once the disk space usage reach the high level, the quota will be decreased to keep the disk usage
 // around the disk safe level.
-// On the other hand, if the cache is full and the disk usage falls below the disk safe level for a long time,
-// which is configured by `datacache_disk_idle_period_for_expansion`, the cache quota will be increased to keep the
+// On the other hand, if the cache is full and the disk usage falls below the disk low level for a long time,
+// which is configured by `datacache_disk_idle_seconds_for_expansion`, the cache quota will be increased to keep the
 // disk usage around the disk safe level.
 CONF_mBool(datacache_auto_adjust_enable, "false");
-// The disk usage threshold, which trigger the cache eviction and quota decreased.
-CONF_mInt64(datacache_disk_urgent_level, "80");
-// The disk usage threshold, the cache quota will be decreased to this level once it reach the urgent level.
+// The high disk usage level, which trigger the cache eviction and quota decreased.
+CONF_mInt64(datacache_disk_high_level, "80");
+// The safe disk usage level, the cache quota will be decreased to this level once it reach the high level.
 CONF_mInt64(datacache_disk_safe_level, "70");
+// The low disk usage level, which trigger the cache expansion and quota increased.
+CONF_mInt64(datacache_disk_low_level, "60");
 // The interval seconds to check the disk usage and trigger adjustment.
 CONF_mInt64(datacache_disk_adjust_interval_seconds, "10");
-// The silent period, only when the disk usage falls bellow the safe level for a time longer than this period,
+// The silent period, only when the disk usage falls bellow the low level for a time longer than this period,
 // the disk expansion can be triggered
 CONF_mInt64(datacache_disk_idle_seconds_for_expansion, "7200");
 // The minimum total disk quota bytes to adjust, once the quota to adjust is less than this value,
@@ -1143,7 +1150,7 @@ CONF_mInt64(l0_max_mem_usage, "104857600"); // 100MB
 // if l0_mem_size exceeds this value, l0 need snapshot
 CONF_mInt64(l0_snapshot_size, "16777216"); // 16MB
 CONF_mInt64(max_tmp_l1_num, "10");
-CONF_mBool(enable_parallel_get_and_bf, "true");
+CONF_mBool(enable_parallel_get_and_bf, "false");
 // Control if using the minor compaction strategy
 CONF_Bool(enable_pindex_minor_compaction, "true");
 // if l2 num is larger than this, stop doing async compaction,
@@ -1318,5 +1325,18 @@ CONF_mInt64(arrow_read_batch_size, "4096");
 // Set to true to enable socket_keepalive option in brpc
 CONF_mBool(brpc_socket_keepalive, "false");
 CONF_mBool(apply_del_vec_after_all_index_filter, "true");
+
+// .crm file can be removed after 1day.
+CONF_mInt32(unused_crm_file_threshold_second, "86400" /** 1day **/);
+
+// python envs config
+// create time worker timeout
+CONF_mInt32(create_child_worker_timeout_ms, "1000");
+// config ENV PYTHONPATH
+CONF_Strings(python_envs, "");
+// report python worker STDERR to client
+CONF_Bool(report_python_worker_error, "true");
+CONF_Bool(python_worker_reuse, "true");
+CONF_Int32(python_worker_expire_time_sec, "300");
 
 } // namespace starrocks::config

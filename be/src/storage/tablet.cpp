@@ -1196,6 +1196,16 @@ void Tablet::pick_candicate_rowsets_to_base_compaction(vector<RowsetSharedPtr>* 
     }
 }
 
+void Tablet::pick_candicate_rowset_before_specify_version(vector<RowsetSharedPtr>* candidcate_rowsets,
+                                                          int64_t version) {
+    std::shared_lock rdlock(_meta_lock);
+    for (auto& it : _rs_version_map) {
+        if (it.first.first <= version) {
+            candidcate_rowsets->push_back(it.second);
+        }
+    }
+}
+
 void Tablet::pick_all_candicate_rowsets(vector<RowsetSharedPtr>* candidate_rowsets) {
     std::shared_lock rdlock(_meta_lock);
     for (auto& it : _rs_version_map) {
@@ -1554,9 +1564,10 @@ void Tablet::generate_tablet_meta_copy_unlocked(const TabletMetaSharedPtr& new_t
     new_tablet_meta->init_from_pb(&tablet_meta_pb);
 }
 
-Status Tablet::rowset_commit(int64_t version, const RowsetSharedPtr& rowset, uint32_t wait_time) {
+Status Tablet::rowset_commit(int64_t version, const RowsetSharedPtr& rowset, uint32_t wait_time,
+                             bool is_version_overwrite, bool is_double_write) {
     CHECK(_updates) << "updates should exists";
-    return _updates->rowset_commit(version, rowset, wait_time);
+    return _updates->rowset_commit(version, rowset, wait_time, is_version_overwrite, is_double_write);
 }
 
 void Tablet::on_shutdown() {
@@ -1780,7 +1791,7 @@ const TabletSchemaCSPtr Tablet::thread_safe_get_tablet_schema() const {
     return _max_version_schema;
 }
 
-TabletSchemaCSPtr Tablet::update_max_version_schema(const TabletSchemaCSPtr& tablet_schema) {
+void Tablet::update_max_version_schema(const TabletSchemaCSPtr& tablet_schema) {
     std::lock_guard l0(_meta_lock);
     std::lock_guard l1(_schema_lock);
     // Double Check for concurrent update
@@ -1790,10 +1801,8 @@ TabletSchemaCSPtr Tablet::update_max_version_schema(const TabletSchemaCSPtr& tab
         } else {
             _max_version_schema = GlobalTabletSchemaMap::Instance()->emplace(tablet_schema).first;
         }
+        _tablet_meta->save_tablet_schema(_max_version_schema, _data_dir);
     }
-
-    _tablet_meta->save_tablet_schema(_max_version_schema, _data_dir);
-    return _max_version_schema;
 }
 
 const TabletSchema& Tablet::unsafe_tablet_schema_ref() const {

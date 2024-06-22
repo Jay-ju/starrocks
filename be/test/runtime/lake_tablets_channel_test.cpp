@@ -198,7 +198,7 @@ protected:
         _load_channel =
                 std::make_shared<LoadChannel>(_load_channel_mgr.get(), _tablet_manager.get(), UniqueId::gen_uid(),
                                               next_id(), string(), 1000, std::move(load_mem_tracker));
-        TabletsChannelKey key{UniqueId::gen_uid().to_proto(), kIndexId};
+        TabletsChannelKey key{UniqueId::gen_uid().to_proto(), 0, kIndexId};
         _tablets_channel = new_lake_tablets_channel(_load_channel.get(), _tablet_manager.get(), key,
                                                     _load_channel->mem_tracker(), _root_profile.get());
     }
@@ -833,23 +833,24 @@ TEST_P(LakeTabletsChannelMultiSenderTest, test_dont_write_txn_log) {
         SyncPoint::GetInstance()->DisableProcessing();
     });
 
+    auto open_request = _open_request;
+    open_request.set_sender_id(0);
+    open_request.set_num_senders(num_sender);
+    open_request.mutable_lake_tablet_params()->set_write_txn_log(false);
+
+    auto open_response = PTabletWriterOpenResult{};
+
+    ASSERT_OK(_tablets_channel->open(open_request, &open_response, _schema_param, false));
+    ASSERT_EQ(0, open_response.status().status_code());
+
     auto sender_task = [&](int sender_id) {
-        auto open_request = _open_request;
-        open_request.set_sender_id(sender_id);
-        open_request.set_num_senders(num_sender);
-        open_request.mutable_lake_tablet_params()->set_write_txn_log(false);
-
-        auto open_response = PTabletWriterOpenResult{};
-
-        ASSERT_OK(_tablets_channel->open(open_request, &open_response, _schema_param, false));
-        ASSERT_EQ(0, open_response.status().status_code());
-
         PTabletWriterAddChunkRequest add_chunk_request;
         PTabletWriterAddBatchResult add_chunk_response;
         add_chunk_request.set_index_id(kIndexId);
         add_chunk_request.set_sender_id(sender_id);
         add_chunk_request.set_eos(false);
         add_chunk_request.set_packet_seq(0);
+        add_chunk_request.set_timeout_ms(30 * 1000);
 
         for (int i = 0; i < kChunkSize; i++) {
             int64_t tablet_id = 10086 + (i / kChunkSizePerTablet);
@@ -872,6 +873,7 @@ TEST_P(LakeTabletsChannelMultiSenderTest, test_dont_write_txn_log) {
         finish_request.set_packet_seq(1);
         finish_request.add_partition_ids(10);
         finish_request.add_partition_ids(11);
+        finish_request.set_timeout_ms(30 * 1000);
 
         _tablets_channel->add_chunk(nullptr, finish_request, &finish_response);
 

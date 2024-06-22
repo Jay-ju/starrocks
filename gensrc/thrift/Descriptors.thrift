@@ -100,6 +100,8 @@ struct TTextFileDesc {
     
     // escape character
     8: optional i8 escape
+
+    9: optional i32 skip_header_line_count
 }
 
 enum TSchemaTableType {
@@ -460,6 +462,8 @@ struct TTableFunctionTable {
     8: optional string csv_row_delimiter
 
     9: optional string csv_column_seperator
+
+    10: optional bool parquet_use_legacy_encoding
 }
 
 struct TIcebergSchema {

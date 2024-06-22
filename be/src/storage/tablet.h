@@ -238,6 +238,7 @@ public:
     void pick_candicate_rowsets_to_cumulative_compaction(std::vector<RowsetSharedPtr>* candidate_rowsets);
     void pick_candicate_rowsets_to_base_compaction(std::vector<RowsetSharedPtr>* candidate_rowsets);
     void pick_all_candicate_rowsets(std::vector<RowsetSharedPtr>* candidate_rowsets);
+    void pick_candicate_rowset_before_specify_version(vector<RowsetSharedPtr>* candidcate_rowsets, int64_t version);
 
     void calculate_cumulative_point();
 
@@ -256,7 +257,8 @@ public:
 
     // updatable tablet specific operations
     TabletUpdates* updates() { return _updates.get(); }
-    [[nodiscard]] Status rowset_commit(int64_t version, const RowsetSharedPtr& rowset, uint32_t wait_time = 0);
+    [[nodiscard]] Status rowset_commit(int64_t version, const RowsetSharedPtr& rowset, uint32_t wait_time = 0,
+                                       bool is_version_overwrite = false, bool is_double_write = false);
 
     // if there is _compaction_task running
     // do not do compaction
@@ -309,7 +311,7 @@ public:
 
     const TabletSchemaCSPtr thread_safe_get_tablet_schema() const;
 
-    TabletSchemaCSPtr update_max_version_schema(const TabletSchemaCSPtr& tablet_schema);
+    void update_max_version_schema(const TabletSchemaCSPtr& tablet_schema);
 
     int64_t data_size();
 

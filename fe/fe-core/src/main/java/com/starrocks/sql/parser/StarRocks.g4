@@ -707,7 +707,7 @@ showComputeNodesStatement
 // ------------------------------------------- Catalog Statement -------------------------------------------------------
 
 createExternalCatalogStatement
-    : CREATE EXTERNAL CATALOG catalogName=identifierOrString comment? properties
+    : CREATE EXTERNAL CATALOG (IF NOT EXISTS)? catalogName=identifierOrString comment? properties
     ;
 
 showCreateExternalCatalogStatement
@@ -715,7 +715,7 @@ showCreateExternalCatalogStatement
     ;
 
 dropExternalCatalogStatement
-    : DROP CATALOG catalogName=identifierOrString
+    : DROP CATALOG (IF EXISTS)? catalogName=identifierOrString
     ;
 
 showCatalogsStatement
@@ -856,6 +856,8 @@ alterClause
     | compactionClause
     | modifyCommentClause
     | optimizeClause
+    | addFieldClause
+    | dropFieldClause
 
     //Alter partition clause
     | addPartitionClause
@@ -1004,6 +1006,22 @@ rollupRenameClause
 
 compactionClause
     : (BASE | CUMULATIVE)? COMPACT (identifier | identifierList)?
+    ;
+
+subfieldName
+    : identifier | ARRAY_ELEMENT
+    ;
+
+nestedFieldName
+    : subfieldName (DOT_IDENTIFIER | '.' subfieldName)*
+    ;
+
+addFieldClause
+    : MODIFY COLUMN identifier ADD FIELD subfieldDesc (FIRST | AFTER identifier)? properties?
+    ;
+
+dropFieldClause
+    : MODIFY COLUMN identifier DROP FIELD nestedFieldName properties?
     ;
 
 // ---------Alter partition clause---------
@@ -1253,7 +1271,10 @@ dropFunctionStatement
     ;
 
 createFunctionStatement
-    : CREATE GLOBAL? functionType=(TABLE | AGGREGATE)? FUNCTION qualifiedName '(' typeList ')' RETURNS returnType=type (INTERMEDIATE intermediateType =  type)? properties?
+    : CREATE orReplace GLOBAL? functionType=(TABLE | AGGREGATE)? FUNCTION qualifiedName '(' typeList ')' RETURNS returnType=type (properties|inlineProperties)?? inlineFunction?
+    ;
+inlineFunction
+    : AS ATTACHMENT
     ;
 
 typeList
@@ -2453,6 +2474,14 @@ property
     : key=string '=' value=string
     ;
 
+inlineProperties
+    : inlineProperty ( inlineProperty)*
+    ;
+
+inlineProperty
+    : key=identifier '=' value=string
+    ;
+
 varType
     : GLOBAL
     | LOCAL
@@ -2527,7 +2556,7 @@ mapType
     ;
 
 subfieldDesc
-    : identifier type
+    : (identifier | nestedFieldName) type
     ;
 
 subfieldDescs
@@ -2664,4 +2693,6 @@ nonReserved
     | WARNINGS | WEEK | WHITELIST | WORK | WRITE  | WAREHOUSE | WAREHOUSES
     | YEAR
     | DOTDOTDOT | NGRAMBF
+    | FIELD
+    | ARRAY_ELEMENT
     ;

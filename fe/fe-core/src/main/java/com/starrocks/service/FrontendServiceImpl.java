@@ -143,6 +143,7 @@ import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.server.MetadataMgr;
 import com.starrocks.server.TemporaryTableMgr;
 import com.starrocks.server.WarehouseManager;
+import com.starrocks.sql.analyzer.AlterTableClauseAnalyzer;
 import com.starrocks.sql.analyzer.AnalyzerUtils;
 import com.starrocks.sql.analyzer.Authorizer;
 import com.starrocks.sql.analyzer.SemanticException;
@@ -444,7 +445,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 try {
                     tbl = metadataMgr.getTable(catalogName, params.db, tableName);
                 } catch (Exception e) {
-                    LOG.warn(e.getMessage());
+                    LOG.warn(e.getMessage(), e);
                 }
 
                 if (tbl == null) {
@@ -1977,7 +1978,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         try {
             result = updateImmutablePartitionInternal(request);
         } catch (Throwable t) {
-            LOG.warn(t);
+            LOG.warn(t.getMessage(), t);
             result = new TImmutablePartitionResult();
             TStatus errorStatus = new TStatus(RUNTIME_ERROR);
             errorStatus.setError_msgs(Lists.newArrayList(String.format("txn_id=%d failed. %s",
@@ -2313,7 +2314,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         try {
             // creating partition names is ordered
             for (String partitionName : creatingPartitionNames) {
-                txnState.lockCreatePartition(partitionName);
+                olapTable.lockCreatePartition(partitionName);
             }
 
             // ingestion is top priority, if schema change or rollup is running, cancel it
@@ -2339,16 +2340,23 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 LOG.warn("cancel schema change or rollup failed. error: {}", e.getMessage());
             }
 
-            state.getLocalMetastore().addPartitions(db, olapTable.getName(), addPartitionClause);
+            // If a create partition request is from BE or CN, the warehouse information may be lost, we can get it from txn state.
+            ConnectContext ctx = com.starrocks.common.util.Util.getOrCreateConnectContext();
+            if (txnState.getWarehouseId() != WarehouseManager.DEFAULT_WAREHOUSE_ID) {
+                ctx.setCurrentWarehouseId(txnState.getWarehouseId());
+            }
+            AlterTableClauseAnalyzer analyzer = new AlterTableClauseAnalyzer(olapTable);
+            analyzer.analyze(ctx, addPartitionClause);
+            state.getLocalMetastore().addPartitions(ctx, db, olapTable.getName(), addPartitionClause);
         } catch (Exception e) {
-            LOG.warn(e);
+            LOG.warn("failed to cancel alter operation", e);
             errorStatus.setError_msgs(Lists.newArrayList(
                     String.format("automatic create partition failed. error:%s", e.getMessage())));
             result.setStatus(errorStatus);
             return result;
         } finally {
             for (String partitionName : creatingPartitionNames) {
-                txnState.unlockCreatePartition(partitionName);
+                olapTable.unlockCreatePartition(partitionName);
             }
         }
 

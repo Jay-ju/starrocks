@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include "storage/lake/meta_file.h"
 #include "test_util.h"
 #include "testutil/assert.h"
 
@@ -224,22 +225,79 @@ TEST_F(LakePersistentIndexTest, test_major_compaction) {
         index->prepare(EditVersion(i, 0), 0);
         vector<IndexValue> upsert_old_values(keys.size());
         ASSERT_OK(index->upsert(N, key_slices.data(), values.data(), upsert_old_values.data()));
+        // generate sst files.
+        index->minor_compact();
     }
 
-    index->minor_compact();
+    Tablet tablet(_tablet_mgr.get(), tablet_id);
+    auto tablet_metadata_ptr = std::make_shared<TabletMetadata>();
+    tablet_metadata_ptr->CopyFrom(*_tablet_metadata);
+    MetaFileBuilder builder(tablet, tablet_metadata_ptr);
+    // commit sst files
+    ASSERT_OK(index->commit(&builder));
     vector<IndexValue> get_values(M * N);
     ASSERT_OK(index->get(M * N, total_key_slices.data(), get_values.data()));
 
     get_values.clear();
     get_values.reserve(M * N);
     auto txn_log = std::make_shared<TxnLogPB>();
-    ASSERT_OK(index->major_compact(*_tablet_metadata, 0, txn_log.get()));
+    // try to compact sst files.
+    ASSERT_OK(LakePersistentIndex::major_compact(_tablet_mgr.get(), *tablet_metadata_ptr, txn_log.get()));
+    ASSERT_TRUE(txn_log->op_compaction().input_sstables_size() > 0);
+    ASSERT_TRUE(txn_log->op_compaction().has_output_sstable());
     ASSERT_OK(index->apply_opcompaction(txn_log->op_compaction()));
     ASSERT_OK(index->get(M * N, total_key_slices.data(), get_values.data()));
     for (int i = 0; i < M * N; i++) {
         ASSERT_EQ(total_values[i], get_values[i]);
     }
     config::l0_max_mem_usage = l0_max_mem_usage;
+}
+
+TEST_F(LakePersistentIndexTest, test_compaction_strategy) {
+    PersistentIndexSstableMetaPB sstable_meta;
+    std::vector<PersistentIndexSstablePB> sstables;
+    bool merge_base_level = false;
+    auto test_fn = [&](size_t sub_size, size_t N, bool is_base) {
+        sstable_meta.Clear();
+        sstables.clear();
+        auto* sstable_pb = sstable_meta.add_sstables();
+        sstable_pb->set_filesize(1000000);
+        sstable_pb->set_filename("aaa.sst");
+        for (int i = 0; i < N; i++) {
+            sstable_pb = sstable_meta.add_sstables();
+            sstable_pb->set_filesize(sub_size);
+        }
+        LakePersistentIndex::pick_sstables_for_merge(sstable_meta, &sstables, &merge_base_level);
+        if (is_base) {
+            ASSERT_TRUE(merge_base_level);
+            ASSERT_TRUE(sstables.size() == std::min(1 + N, (size_t)config::lake_pk_index_sst_max_compaction_versions));
+            ASSERT_TRUE(sstables[0].filename() == "aaa.sst");
+            for (int i = 1; i < N; i++) {
+                ASSERT_TRUE(sstables[i].filesize() == sub_size);
+            }
+        } else {
+            ASSERT_TRUE(!merge_base_level);
+            ASSERT_TRUE(sstables.size() == std::min(N, (size_t)config::lake_pk_index_sst_max_compaction_versions));
+            for (int i = 0; i < N; i++) {
+                ASSERT_TRUE(sstables[i].filesize() == sub_size);
+            }
+        }
+    };
+    // 1. <1000000, 100>
+    test_fn(100, 1, false);
+    // 2. <1000000>
+    test_fn(100, 0, false);
+    // 3. <1000000, 10000, 10000, 10000, ...(9 items)>
+    test_fn(10000, 9, false);
+    // 4. <1000000, 10000, 10000, 10000, ...(10 items)>
+    test_fn(10000, 10, true);
+    // 4. <1000000, 10000, 10000, 10000, ...(11 items)>
+    test_fn(10000, 11, true);
+    int32_t old = config::lake_pk_index_sst_max_compaction_versions;
+    config::lake_pk_index_sst_max_compaction_versions = 3;
+    // 5. <1000000, 10000, 10000, 10000, ...(11 items)>
+    test_fn(10000, 11, true);
+    config::lake_pk_index_sst_max_compaction_versions = old;
 }
 
 } // namespace starrocks::lake

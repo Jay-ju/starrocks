@@ -22,6 +22,7 @@ import com.starrocks.connector.RemoteFileIO;
 import com.starrocks.connector.RemotePathKey;
 import com.starrocks.connector.exception.StarRocksConnectorException;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hudi.common.config.HoodieMetadataConfig;
 import org.apache.hudi.common.engine.HoodieLocalEngineContext;
@@ -111,9 +112,8 @@ public class HudiRemoteFileIO implements RemoteFileIO {
                 long fileLength = baseFile.map(BaseFile::getFileLen).orElse(-1L);
                 List<String> logs = fileSlice.getLogFiles().map(HoodieLogFile::getFileName).collect(Collectors.toList());
                 // The file name of HoodieBaseFile contains "instantTime", so we set the `modificationTime` to 0.
-                RemoteFileDesc res = new RemoteFileDesc(fileName, "", fileLength, 0,
-                        ImmutableList.of(), ImmutableList.copyOf(logs));
-                res.setHudiInstant(hudiContext.lastInstant);
+                HudiRemoteFileDesc res = HudiRemoteFileDesc.createHudiRemoteFileDesc(fileName, fileLength,
+                        ImmutableList.of(), ImmutableList.copyOf(logs), hudiContext.lastInstant);
                 fileDescs.add(res);
             }
         } catch (Exception e) {
@@ -124,4 +124,8 @@ public class HudiRemoteFileIO implements RemoteFileIO {
         return resultPartitions.put(pathKey, fileDescs).build();
     }
 
+    @Override
+    public FileStatus[] getFileStatus(Path... files) {
+        throw new UnsupportedOperationException("getFileStatus");
+    }
 }
