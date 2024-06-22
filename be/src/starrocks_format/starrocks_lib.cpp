@@ -31,12 +31,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+#include <aws/core/Aws.h>
+#include <aws/core/client/ClientConfiguration.h>
+#include <glog/logging.h>
 #include <unistd.h>
 #include <filesystem>
 #include <fstream>
-
-#include <aws/core/Aws.h>
-#include <aws/core/client/ClientConfiguration.h>
 
 #include "common/config.h"
 #include "fs/fs_s3.h"
@@ -54,6 +54,9 @@ Aws::SDKOptions aws_sdk_options;
 lake::TabletManager* _lake_tablet_manager = nullptr;
 
 void starrocks_format_initialize(void) {
+    setenv("STARROCKS_HOME", "./", 0);
+    setenv("UDF_RUNTIME_DIR", "./", 0);
+
     if (!_starrocks_format_inited) {
         fprintf(stderr, "starrocks format module start to initialize\n");
         // load config file
@@ -65,7 +68,7 @@ void starrocks_format_initialize(void) {
             config_file_path = nullptr;
         }
         if (!starrocks::config::init(config_file_path)) {
-            fprintf(stderr, "error read config file. \n");
+            LOG(WARNING) << "read config file:" << config_file_path << " failed!";
             return;
         }
 
@@ -77,22 +80,22 @@ void starrocks_format_initialize(void) {
 
         auto lake_location_provider = std::make_shared<FixedLocationProvider>("");
         _lake_tablet_manager = new lake::TabletManager(lake_location_provider, config::lake_metadata_cache_limit);
-        fprintf(stderr, "starrocks format module has been initialized successfully\n");
+        LOG(INFO) << "starrocks format module has been initialized successfully";
         _starrocks_format_inited = true;
     } else {
-        fprintf(stderr, "starrocks format module has already been initialized\n");
+        LOG(INFO) << "starrocks format module has already been initialized";
     }
 }
 
 void starrocks_format_deinit(void) {
     if (_starrocks_format_inited) {
-        fprintf(stderr, "starrocks format module start to deinitialize");
+        LOG(INFO) << "starrocks format module start to deinitialize";
         Aws::ShutdownAPI(aws_sdk_options);
         SAFE_DELETE(_lake_tablet_manager);
         // SAFE_DELETE(_lake_update_manager);
-        fprintf(stderr, "starrocks format module has been deinitialized successfully\n");
+        LOG(INFO) << "starrocks format module has been deinitialized successfully";
     } else {
-        fprintf(stderr, "starrocks format module has already been deinitialized\n");
+        LOG(INFO) << "starrocks format module has already been deinitialized";
     }
 }
 

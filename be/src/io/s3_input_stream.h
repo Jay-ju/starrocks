@@ -28,7 +28,7 @@ namespace starrocks::io {
 class S3InputStream final : public SeekableInputStream {
 public:
     explicit S3InputStream(std::shared_ptr<Aws::S3::S3Client> client, std::string bucket, std::string object,
-                           int64_t read_ahead_size)
+                           int64_t read_ahead_size = 5 * 1024 * 1024)
             : _s3client(std::move(client)), _bucket(std::move(bucket)), _object(std::move(object)) {
         _read_ahead_size = read_ahead_size;
         if (_read_ahead_size > 0) {

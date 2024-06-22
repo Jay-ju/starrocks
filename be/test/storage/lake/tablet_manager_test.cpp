@@ -64,13 +64,12 @@ public:
 
     void TearDown() override {
         delete _tablet_manager;
-        auto st = FileSystem::Default()->delete_dir_recursive(_test_dir);
-        st.permit_unchecked_error();
+        FileSystem::Default()->delete_dir_recursive(_test_dir);
     }
 
     starrocks::lake::TabletManager* _tablet_manager{nullptr};
     std::string _test_dir;
-     std::shared_ptr<lake::LocationProvider> _location_provider{nullptr};
+    std::shared_ptr<lake::LocationProvider> _location_provider{nullptr};
     std::unique_ptr<MemTracker> _mem_tracker;
     std::unique_ptr<lake::UpdateManager> _update_manager;
 };

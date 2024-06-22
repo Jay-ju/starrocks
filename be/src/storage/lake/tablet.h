@@ -49,7 +49,25 @@ enum WriterType : int;
 
 class Tablet : public BaseTablet {
 public:
-    explicit Tablet(TabletManager* mgr, int64_t id) : _mgr(mgr), _id(id) {}
+    explicit Tablet(TabletManager* mgr, int64_t id) : _mgr(mgr), _id(id) {
+        if (_mgr != nullptr) {
+            _location_provider = _mgr->location_provider();
+        }
+    }
+
+    explicit Tablet(TabletManager* mgr, int64_t id, std::shared_ptr<LocationProvider> location_provider,
+                    TabletMetadataPtr tablet_metadata)
+            : _mgr(mgr), _id(id) {
+        _location_provider = std::move(location_provider);
+        _tablet_metadata = tablet_metadata;
+    }
+
+    explicit Tablet(TabletManager* mgr, int64_t id, std::shared_ptr<LocationProvider> location_provider,
+                    std::shared_ptr<TabletSchema> tablet_schema)
+            : _mgr(mgr), _id(id) {
+        _location_provider = std::move(location_provider);
+        _tablet_schema = tablet_schema;
+    }
 
     ~Tablet() override = default;
 

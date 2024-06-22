@@ -114,32 +114,21 @@ TEST_F(S3FileSystemTest, test_root_directory) {
     ASSERT_ERROR(fs->delete_dir(bucket_root));
 }
 
-TEST_F(S3FileSystemTest, test_cache) {
-    TCloudConfiguration cloud_config;
-    S3ClientFactory client_factory = S3ClientFactory::instance();
-    S3ClientFactory::S3ClientPtr client1 = client_factory.new_client(cloud_config);
-    S3ClientFactory::S3ClientPtr client2 = client_factory.new_client(cloud_config);
-    ASSERT_TRUE(client1 == client2);
-}
-
 TEST_F(S3FileSystemTest, test_prefetch) {
     std::unordered_map<std::string, std::string> params = {{"fs.s3a.readahead.range", "100"}};
     RandomAccessFileOptions opts{.skip_fill_local_cache = true};
     std::unique_ptr<FSOptions> fs_options = std::make_unique<FSOptions>(params);
-    std::unique_ptr<S3FileSystem> fs = std::make_unique<S3FileSystem>(*fs_options);
-    ASSIGN_OR_ABORT(rf, fs->new_random_access_file(opts, "/tmp/a.file"));
+    std::unique_ptr<FileSystem> fs = new_fs_s3(*fs_options);
+    ASSIGN_OR_ABORT(auto rf, fs->new_random_access_file(opts, "/tmp/a.file"));
 }
 
 TEST_F(S3FileSystemTest, test_retry) {
     TCloudConfiguration cloud_config;
-    S3URI uri = S3URI.parse("s3://bucket1/path1");
     std::unordered_map<std::string, std::string> params = {{"fs.s3a.retry.limit", "10"},
                                                            {"fs.s3a.retry.interval", "10"}};
     std::unique_ptr<FSOptions> fs_options = std::make_unique<FSOptions>(params);
-
-    S3ClientFactory client_factory = S3ClientFactory::instance();
-    S3ClientFactory::S3ClientPtr client = client_factory.new_client(uri, cloud_config);
-    ASSERT_TRUE(*client);
+    std::unique_ptr<FileSystem> fs = new_fs_s3(*fs_options);
+    ASSERT_TRUE(fs != nullptr);
 }
 
 TEST_F(S3FileSystemTest, test_directory) {

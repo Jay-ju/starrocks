@@ -35,7 +35,6 @@ set(EXEC_FILES
 
 if (NOT BUILD_FORMAT_LIB)
     list(APPEND EXEC_FILES fs_starlet.cpp)
-    message(STATUS "include fs_starlet.cpp when build fs.")
 endif()
 
 add_library(FileSystem STATIC

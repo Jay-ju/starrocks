@@ -266,7 +266,6 @@ set(STORAGE_FILES
 
 if (NOT BUILD_FORMAT_LIB)
     list(APPEND STORAGE_FILES  lake/starlet_location_provider.cpp)
-    message(STATUS "include starlet_location_provider.cpp when build Storage.")
 endif()
 
 add_library(Storage STATIC

@@ -38,10 +38,9 @@
 namespace starrocks::lake {
 
 extern lake::TabletManager* _lake_tablet_manager;
-// extern lake::UpdateManager* _lake_update_manager;
 
 void starrocks_format_initialize(void);
 
 void starrocks_format_deinit(void);
 
-} // namespace starrocks
+} // namespace starrocks::lake
