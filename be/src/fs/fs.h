@@ -17,6 +17,7 @@
 
 #include "common/statusor.h"
 #include "fs/credential/cloud_configuration_factory.h"
+#include "fs/encryption.h"
 #include "gen_cpp/PlanNodes_types.h"
 #include "io/input_stream.h"
 #include "io/seekable_input_stream.h"
@@ -95,6 +96,7 @@ struct SequentialFileOptions {
     bool skip_fill_local_cache = false;
     // Specify different buffer size for different read scenarios
     int64_t buffer_size = -1;
+    FileEncryptionInfo encryption_info;
 };
 
 struct RandomAccessFileOptions {
@@ -103,6 +105,7 @@ struct RandomAccessFileOptions {
     bool skip_fill_local_cache = false;
     // Specify different buffer size for different read scenarios
     int64_t buffer_size = -1;
+    FileEncryptionInfo encryption_info;
 };
 
 struct DirEntry {
@@ -116,6 +119,7 @@ struct FileInfo {
     std::string path;
     std::optional<int64_t> size;
     std::shared_ptr<FileSystem> fs;
+    std::string encryption_meta;
 };
 
 struct FileWriteStat {
@@ -322,6 +326,7 @@ struct WritableFileOptions {
 
     // See OpenMode for details.
     FileSystem::OpenMode mode = FileSystem::MUST_CREATE;
+    FileEncryptionInfo encryption_info;
 };
 
 // A `SequentialFile` is an `io::InputStream` with a name.
@@ -335,6 +340,9 @@ public:
     const std::string& filename() const { return _name; }
 
     std::shared_ptr<io::InputStream> stream() { return _stream; }
+
+    static std::unique_ptr<SequentialFile> from(std::unique_ptr<io::SeekableInputStream> stream,
+                                                const std::string& name, const FileEncryptionInfo& info);
 
 private:
     std::shared_ptr<io::InputStream> _stream;
@@ -360,6 +368,10 @@ public:
     const std::string& filename() const override { return _name; }
 
     bool is_cache_hit() const override { return _is_cache_hit; }
+
+    static std::unique_ptr<RandomAccessFile> from(std::unique_ptr<io::SeekableInputStream> stream,
+                                                  const std::string& name, bool is_cache_hit,
+                                                  const FileEncryptionInfo& info);
 
 private:
     std::shared_ptr<io::SeekableInputStream> _stream;

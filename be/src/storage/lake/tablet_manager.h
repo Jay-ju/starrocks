@@ -77,14 +77,15 @@ public:
 
     Status put_tablet_metadata(const TabletMetadataPtr& metadata);
 
-    StatusOr<TabletMetadataPtr> get_tablet_metadata(int64_t tablet_id, int64_t version);
+    StatusOr<TabletMetadataPtr> get_tablet_metadata(int64_t tablet_id, int64_t version, bool fill_cache = true);
 
-    StatusOr<TabletMetadataPtr> get_tablet_metadata(const string& path, bool fill_cache = true);
+    StatusOr<TabletMetadataPtr> get_tablet_metadata(const std::string& path, bool fill_cache = true);
     StatusOr<TabletMetadataPtr> get_tablet_metadata(std::shared_ptr<FileSystem> fs, const std::string& path, bool fill_cache = true);
+
 
     TabletMetadataPtr get_latest_cached_tablet_metadata(int64_t tablet_id);
 
-    StatusOr<TabletMetadataIter> list_tablet_metadata(int64_t tablet_id, bool filter_tablet);
+    StatusOr<TabletMetadataIter> list_tablet_metadata(int64_t tablet_id);
 
     Status delete_tablet_metadata(int64_t tablet_id, int64_t version);
 
@@ -138,6 +139,8 @@ public:
     std::string tablet_metadata_root_location(int64_t tablet_id) const;
 
     std::string tablet_metadata_location(int64_t tablet_id, int64_t version) const;
+
+    std::string tablet_initial_metadata_location(int64_t tablet_id) const;
 
     std::string txn_log_location(int64_t tablet_id, int64_t txn_id) const;
 
@@ -206,6 +209,8 @@ private:
     StatusOr<TabletSchemaPtr> get_tablet_schema_by_id(int64_t tablet_id, int64_t schema_id);
 
     StatusOr<TabletMetadataPtr> load_tablet_metadata(std::shared_ptr<FileSystem> fs, const std::string& metadata_location, bool fill_cache);
+    Status put_tablet_metadata(const TabletMetadataPtr& metadata, const std::string& metadata_location);
+    StatusOr<TabletMetadataPtr> load_tablet_metadata(const std::string& metadata_location, bool fill_cache);
     StatusOr<TxnLogPtr> load_txn_log(const std::string& txn_log_location, bool fill_cache);
     StatusOr<CombinedTxnLogPtr> load_combined_txn_log(const std::string& path, bool fill_cache);
 
