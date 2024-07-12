@@ -512,7 +512,7 @@ StatusOr<std::unique_ptr<RandomAccessFile>> S3FileSystem::new_random_access_file
         }
     }
     auto input_stream =
-            std::make_shared<io::S3InputStream>(std::move(client), uri.bucket(), uri.key(), read_ahead_size);
+            std::make_unique<io::S3InputStream>(std::move(client), uri.bucket(), uri.key(), read_ahead_size);
     return RandomAccessFile::from(std::move(input_stream), path, false, opts.encryption_info);
 }
 
@@ -533,7 +533,7 @@ StatusOr<std::unique_ptr<RandomAccessFile>> S3FileSystem::new_random_access_file
         }
     }
     auto input_stream =
-            std::make_shared<io::S3InputStream>(std::move(client), uri.bucket(), uri.key(), read_ahead_size);
+            std::make_unique<io::S3InputStream>(std::move(client), uri.bucket(), uri.key(), read_ahead_size);
     if (file_info.size.has_value()) {
         input_stream->set_size(file_info.size.value());
     }
@@ -557,8 +557,8 @@ StatusOr<std::unique_ptr<SequentialFile>> S3FileSystem::new_sequential_file(cons
         }
     }
     auto input_stream =
-            std::make_shared<io::S3InputStream>(std::move(client), uri.bucket(), uri.key(), read_ahead_size);
- 
+            std::make_unique<io::S3InputStream>(std::move(client), uri.bucket(), uri.key(), read_ahead_size);
+
     return SequentialFile::from(std::move(input_stream), path, opts.encryption_info);
 }
 

@@ -118,8 +118,8 @@ struct DirEntry {
 struct FileInfo {
     std::string path;
     std::optional<int64_t> size;
-    std::shared_ptr<FileSystem> fs;
     std::string encryption_meta;
+    std::shared_ptr<FileSystem> fs;
 };
 
 struct FileWriteStat {
